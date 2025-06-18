@@ -219,7 +219,7 @@ export function HSQNNAdvisor({ onApplyParameters, onSaveConfig, className }: HSQ
     }
   };
 
-  const handleApplyAdvice = () => {
+  const handleApplyAdvice = async () => {
     if (!advisorResult?.suggestedNextTrainingParameters) {
       setError("No advice to apply");
       return;
@@ -249,6 +249,22 @@ export function HSQNNAdvisor({ onApplyParameters, onSaveConfig, className }: HSQ
       baseConfigId: selectedJobDetails?.job_id,
     };
 
+    // Check if the selected job has a corresponding .pth file
+    if (selectedJobDetails?.job_id) {
+      try {
+        const response = await fetch(`${API_BASE_URL}/status/${selectedJobDetails.job_id}`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch job status: ${response.statusText}`);
+        }
+        const jobStatus = await response.json();
+        if (jobStatus.status !== "completed") {
+          console.warn(`Warning: Selected job ${selectedJobDetails.job_id} is not completed. No .pth file may exist.`);
+        }
+      } catch (error) {
+        console.error("Error checking job status:", error);
+      }
+    }
+
     // Pass previous job ID to parent for PTH file loading
     onApplyParameters(mergedParams, selectedJobDetails?.job_id);
   };
@@ -272,7 +288,7 @@ export function HSQNNAdvisor({ onApplyParameters, onSaveConfig, className }: HSQ
   };
 
   return (
-    <Card className={cn("w-full", className)}>
+    <div className="matrix-panel">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
           <Brain className="h-5 w-5 text-primary" /> HS-QNN Advisor
@@ -340,10 +356,10 @@ export function HSQNNAdvisor({ onApplyParameters, onSaveConfig, className }: HSQ
               {JSON.stringify(advisorResult.suggestedNextTrainingParameters, null, 2)}
             </pre>
             <div className="flex gap-2">
-              <Button onClick={() => { handleApplyAdvice(); /* TODO: trigger PTH file load for previous job */ }} disabled={isLoading}>
+              <Button onClick={handleApplyAdvice} disabled={isLoading} className="instrument-btn">
                 <Wand2 className="mr-2 h-4 w-4" /> Load in Trainer
               </Button>
-              <Button variant="outline" onClick={handleSaveConfig} disabled={isLoading}>
+              <Button variant="outline" onClick={handleSaveConfig} disabled={isLoading} className="instrument-btn">
                 <Save className="mr-2 h-4 w-4" /> Save Config
               </Button>
             </div>
@@ -351,7 +367,7 @@ export function HSQNNAdvisor({ onApplyParameters, onSaveConfig, className }: HSQ
         )}
       </CardContent>
       <CardFooter>
-        <Button onClick={handleGetAdvice} disabled={isLoading || !selectedJobId}>
+        <Button onClick={handleGetAdvice} disabled={isLoading || !selectedJobId} className="instrument-btn">
           {isLoading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating Advice...
@@ -363,6 +379,6 @@ export function HSQNNAdvisor({ onApplyParameters, onSaveConfig, className }: HSQ
           )}
         </Button>
       </CardFooter>
-    </Card>
+    </div>
   );
 } 

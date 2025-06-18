@@ -24,6 +24,8 @@ import pandas as pd  # For dataset preparation
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import LabelEncoder
 import logging
+from src.lib.training_logger import TrainingLogger
+from mixup_alpha_advisor import router as mixup_alpha_router
 
 # GPU Monitoring Setup
 PYNVML_AVAILABLE = False
@@ -52,6 +54,9 @@ os.makedirs(DATASET_DIR, exist_ok=True)
 # In-Memory Storage
 active_jobs: Dict[str, Dict[str, Any]] = {}
 model_configs: Dict[str, Dict[str, Any]] = {}
+
+# Initialize the training logger
+training_logger = TrainingLogger()
 
 # Lifespan Context Manager
 @asynccontextmanager
@@ -205,7 +210,7 @@ class ZPEDeepNet(nn.Module):
     def perturb_zpe_flow(self, data, zpe_idx, feature_size):
         if data.numel() == 0:
             return
-        batch_mean = torch.mean(data.detach(), dim=0).view(-1)
+        batch_mean = torch.mean(data.detach(), dim=0).reshape(-1)
         if batch_mean.numel() == 0 or self.sequence_length == 0:
             return
         divisible_size = (batch_mean.size(0) // self.sequence_length) * self.sequence_length
@@ -215,12 +220,12 @@ class ZPEDeepNet(nn.Module):
                 if padding_size < 0:
                     padding_size = 0
                 batch_mean_padded = torch.cat((batch_mean, torch.zeros(padding_size, device=self.device)))
-                reshaped = batch_mean_padded.view(-1, self.sequence_length)
+                reshaped = batch_mean_padded.reshape(-1, self.sequence_length)
             else:
                 return
         else:
             batch_mean_truncated = batch_mean[:divisible_size]
-            reshaped = batch_mean_truncated.view(-1, self.sequence_length)
+            reshaped = batch_mean_truncated.reshape(-1, self.sequence_length)
         if reshaped.numel() == 0:
             return
         perturbation = torch.mean(reshaped, dim=0)
@@ -251,7 +256,7 @@ class ZPEDeepNet(nn.Module):
             num_elements_to_cover = x.size(2) * x.size(3)
             repeats = (num_elements_to_cover + self.sequence_length - 1) // self.sequence_length
             flow_expanded_flat = flow.repeat(repeats)[:num_elements_to_cover]
-            flow_expanded = flow_expanded_flat.view(1, 1, x.size(2), x.size(3))
+            flow_expanded = flow_expanded_flat.reshape(1, 1, x.size(2), x.size(3))
             if x.size(1) > 0:
                 flow_expanded = flow_expanded.expand(x.size(0), x.size(1), x.size(2), x.size(3))
         else:
@@ -260,7 +265,7 @@ class ZPEDeepNet(nn.Module):
             num_elements_to_cover = x.size(-1)
             repeats = (num_elements_to_cover + self.sequence_length - 1) // self.sequence_length
             flow_expanded_flat = flow.repeat(repeats)[:num_elements_to_cover]
-            flow_expanded = flow_expanded_flat.view(1, -1).expand_as(x)
+            flow_expanded = flow_expanded_flat.reshape(1, -1).expand_as(x)
         return x * flow_expanded
 
     def forward(self, x):
@@ -503,6 +508,9 @@ def run_training_job(job_id: str, params: TrainingParameters):
                     job_status["log_messages"].append(f"Loaded previous weights from {prev_model_path} for continue training.")
                 except Exception as e:
                     job_status["log_messages"].append(f"Failed to load previous weights from {prev_model_path}: {e}. Starting fresh.")
+                    # List available .pth files for debugging
+                    available = [f for f in os.listdir(JOBS_DIR) if f.endswith('_model.pth')]
+                    job_status["log_messages"].append(f"Available model files: {available}")
             else:
                 job_status["log_messages"].append(f"No previous weights found for baseConfigId {params.baseConfigId}, starting fresh.")
 
@@ -510,6 +518,8 @@ def run_training_job(job_id: str, params: TrainingParameters):
             if job_status["status"] == "stopped":
                 job_status["log_messages"].append("Training stopped.")
                 break
+
+            epoch_start_time = time.time()
             model.train()
             epoch_loss_sum, num_batches_epoch = 0.0, 0
             job_status["log_messages"].append(f"--- Epoch {epoch}/{params.totalEpochs} ---")
@@ -554,8 +564,12 @@ def run_training_job(job_id: str, params: TrainingParameters):
                     _, predicted_val = torch.max(output_val.data, 1)
                     val_total += target_val.size(0)
                     val_correct += (predicted_val == target_val).sum().item()
+
             val_accuracy = (100 * val_correct / val_total) if val_total > 0 else 0.0
             avg_epoch_val_loss = val_loss_sum / val_batches_epoch if val_batches_epoch > 0 else 0.0
+            epoch_time = time.time() - epoch_start_time
+
+            # Update job status
             job_status.update({
                 "current_epoch": epoch, "accuracy": val_accuracy, "loss": avg_epoch_val_loss,
                 "zpe_effects": model.analyze_zpe_effect(),
@@ -564,6 +578,23 @@ def run_training_job(job_id: str, params: TrainingParameters):
             job_status["zpe_history"].append({
                 "epoch": epoch, "zpe_effects": job_status["zpe_effects"]
             })
+
+            # Log epoch data to CSV
+            training_logger.log_epoch(
+                job_id=job_status.get("job_id", ""),
+                epoch=epoch,
+                total_epochs=params.totalEpochs,
+                timestamp=datetime.now().isoformat(),
+                model_name=params.modelName,
+                base_config_id=getattr(params, "baseConfigId", ""),
+                train_loss=avg_epoch_train_loss,
+                val_loss=avg_epoch_val_loss,
+                val_accuracy=val_accuracy,
+                epoch_time=epoch_time,
+                params=params.model_dump() if hasattr(params, "model_dump") else vars(params),
+                zpe_effects=job_status.get("zpe_effects", [0.0]*6)
+            )
+
             job_status["log_messages"].append(f"E{epoch} END - TrainL: {avg_epoch_train_loss:.4f}, ValAcc: {val_accuracy:.2f}%, ValL: {avg_epoch_val_loss:.4f}")
             job_status["log_messages"].append(f"ZPE: {[f'{x:.4f}' for x in job_status['zpe_effects']]}")
             save_job_status(job_id)
@@ -576,6 +607,10 @@ def run_training_job(job_id: str, params: TrainingParameters):
             model_save_path = os.path.join(JOBS_DIR, f"{job_id}_model.pth")
             torch.save(model.state_dict(), model_save_path)
             job_status["log_messages"].append(f"Model saved: {model_save_path}")
+            
+            # Log final job completion
+            training_logger.log_job_completion(job_status['job_id'], job_status['accuracy'], job_status['loss'])
+
     except Exception as e:
         job_status["status"] = "failed"
         error_msg = f"Train Error job {job_id}: {str(e)}"
@@ -800,6 +835,8 @@ async def chat_endpoint(chat_message: ChatMessage):
             response_text = await call_simulate_zpe(job_id)
 
     return {"response": response_text}
+
+app.include_router(mixup_alpha_router)
 
 # Main Entry Point
 if __name__ == "__main__":

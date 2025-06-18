@@ -215,24 +215,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
      });
   };
 
-
   return (
     <SidebarProvider>
       <AdvisorProvider>
-        <div className="flex h-screen w-screen overflow-hidden">
-          <Sidebar className="h-full">
-            <AppSidebarContent />
-          </Sidebar>
-          <main className="flex-1 overflow-y-auto bg-background dark:bg-zinc-950">
-            {children}
-          </main>
+        <div className="relative h-screen w-screen overflow-hidden">
+          {/* Animated holographic background */}
+          <div className="animated-holo-bg" aria-hidden="true" />
+          <div
+            className="grid h-full w-full"
+            style={{ gridTemplateColumns: '22rem 1fr' }}
+          >
+            <Sidebar className="h-full sidebar bg-gradient-to-b from-zinc-950/90 to-zinc-900/80 backdrop-blur-lg shadow-2xl border-r-2 border-accent/40 px-4 py-6 space-y-2">
+              <AppSidebarContent />
+            </Sidebar>
+            <main className="flex flex-col h-full w-full bg-zinc-900/80 transition-all duration-300 p-4 md:p-8 overflow-y-auto">
+              {children}
+            </main>
+          </div>
+          {/* Floating Mini Advisor always present */}
+          <FloatingMiniAdvisor
+            onApplyParameters={() => {}}
+            onSaveConfig={() => {}}
+            defaultMinimized={true}
+          />
         </div>
-        {/* Floating Mini Advisor always present */}
-        <FloatingMiniAdvisor
-          onApplyParameters={() => {}}
-          onSaveConfig={() => {}}
-          defaultMinimized={true}
-        />
       </AdvisorProvider>
     </SidebarProvider>
   );

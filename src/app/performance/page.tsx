@@ -21,6 +21,7 @@ import { format } from "date-fns";
 import { toast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import NeonAnalyzerChart from '@/components/visualizations/NeonAnalyzerChart';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
 const NONE_OPTION_VALUE = "none-option";
@@ -387,34 +388,19 @@ export default function PerformancePage() {
               </CardHeader>
               <CardContent className="pt-0">
                   <div className="h-[350px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={getTrainingCurveData()}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border)/0.5)" />
-                            <XAxis dataKey="epoch" name="Epoch" stroke="hsl(var(--muted-foreground))" fontSize={10}/>
-                            <YAxis 
-                              domain={metricType === "accuracy" ? [80, 100] : [0, 'auto']} 
-                              tickFormatter={(val) => metricType === "accuracy" ? `${val}%` : val.toFixed(3)} // Loss to 3 decimal places
-                              stroke="hsl(var(--muted-foreground))" fontSize={10}
-                            />
-                            <Tooltip 
-                              contentStyle={{ backgroundColor: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)"}} 
-                              labelStyle={{color: "hsl(var(--popover-foreground))"}}
-                              itemStyle={{color: "hsl(var(--popover-foreground))"}}
-                            />
-                            <Legend wrapperStyle={{fontSize: "10px"}}/>
-                            {metricType === "accuracy" ? (
-                                <>
-                                  <Line type="monotone" dataKey={`${activeJob.parameters.modelName || 'Active'} Val Acc`} stroke={accuracyColors.validation} strokeWidth={2} dot={false}/>
-                                  {comparisonJob && <Line type="monotone" dataKey={`${comparisonJob.parameters.modelName || 'Comparison'} Val Acc`} stroke={accuracyColors.validation} strokeDasharray="5 5" dot={false}/> }
-                                </>
-                            ) : (
-                                <>
-                                  <Line type="monotone" dataKey={`${activeJob.parameters.modelName || 'Active'} Val Loss`} stroke={lossColors.validation} strokeWidth={2} dot={false}/>
-                                  {comparisonJob && <Line type="monotone" dataKey={`${comparisonJob.parameters.modelName || 'Comparison'} Val Loss`} stroke={lossColors.validation} strokeDasharray="5 5" dot={false}/>}
-                                </>
-                            )}
-                        </LineChart>
-                      </ResponsiveContainer>
+                    <NeonAnalyzerChart
+                      traces={[
+                        { data: getTrainingCurveData().map(d => d.active), color: '#00ffe7', label: `${activeJob?.parameters?.modelName || 'Active'} ${metricType === 'accuracy' ? 'Accuracy' : 'Loss'}` },
+                        ...(comparisonJob ? [{ data: getTrainingCurveData().map(d => d.comparison), color: '#ff00ff', label: `${comparisonJob.parameters?.modelName || 'Comparison'} ${metricType === 'accuracy' ? 'Accuracy' : 'Loss'}` }] : [])
+                      ]}
+                      width={600}
+                      height={320}
+                      overlays={[
+                        { text: metricType === 'accuracy' ? 'Accuracy' : 'Loss', color: '#39ff14', x: 120, y: 40, fontSize: 24 },
+                        { text: `Model: ${activeJob?.parameters.modelName}`, color: '#00ffe7', x: 80, y: 300, fontSize: 16 }
+                      ]}
+                      showLegend
+                    />
                   </div>
               </CardContent>
             </Card>
@@ -617,15 +603,18 @@ export default function PerformancePage() {
                       <CardHeader><CardTitle>ZPE Effects By Layer</CardTitle><CardDescription>Zero-point energy influence across network for <strong>{activeJob.parameters.modelName}</strong> (Final values)</CardDescription></CardHeader>
                       <CardContent>
                           <div className="h-80">
-                              <ResponsiveContainer width="100%" height="100%">
-                                  <BarChart data={getZPEEffectData(activeJob)}>
-                                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border)/0.5)" />
-                                      <XAxis dataKey="name" fontSize={10} stroke="hsl(var(--muted-foreground))"/>
-                                      <YAxis domain={[0, 'auto']} fontSize={10} stroke="hsl(var(--muted-foreground))"/>
-                                      <Tooltip contentStyle={{ backgroundColor: "hsl(var(--popover))", border: "1px solid hsl(var(--border))"}}/>
-                                      <Bar dataKey="value" fill="hsl(var(--chart-4))" radius={[3,3,0,0]} name="ZPE Effect"/>
-                                  </BarChart>
-                              </ResponsiveContainer>
+                              <NeonAnalyzerChart
+                                traces={[
+                                  { data: getZPEEffectData(activeJob).map(d => d.value), color: '#ffe066', label: 'ZPE Effect' }
+                                ]}
+                                width={600}
+                                height={320}
+                                overlays={[
+                                  { text: 'ZPE Effects By Layer', color: '#39ff14', x: 120, y: 40, fontSize: 24 },
+                                  { text: `Model: ${activeJob?.parameters.modelName}`, color: '#00ffe7', x: 80, y: 300, fontSize: 16 }
+                                ]}
+                                showLegend
+                              />
                           </div>
                           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mt-6">
                               {getZPEEffectData(activeJob).map((data, i) => (
@@ -644,22 +633,20 @@ export default function PerformancePage() {
                   <CardHeader><CardTitle>ZPE Evolution During Training</CardTitle><CardDescription>Changes in ZPE impact per layer for <strong>{activeJob.parameters.modelName}</strong></CardDescription></CardHeader>
                   <CardContent>
                       <div className="h-80">
-                          <ResponsiveContainer width="100%" height="100%">
-                              <LineChart data={getJobMetrics(activeJob.job_id).map(m => {
-                                const point: any = {epoch: m.epoch};
-                                m.zpe_effects?.forEach((val, idx) => point[`Layer ${idx+1}`] = val);
-                                return point;
-                              })}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border)/0.5)"/>
-                                  <XAxis dataKey="epoch" fontSize={10} stroke="hsl(var(--muted-foreground))"/>
-                                  <YAxis domain={[0, 'auto']} fontSize={10} stroke="hsl(var(--muted-foreground))" tickFormatter={(val) => val.toFixed(2)}/>
-                                  <Tooltip contentStyle={{ backgroundColor: "hsl(var(--popover))", border: "1px solid hsl(var(--border))"}}/>
-                                  <Legend wrapperStyle={{fontSize: "10px"}}/>
-                                  {activeJob.zpe_effects.map((_, i) => ( // Assuming 6 layers for ZPE
-                                  <Line key={`zpe-layer-${i}`} type="monotone" dataKey={`Layer ${i+1}`} stroke={COLORS[i % COLORS.length]} dot={false} strokeWidth={1.5}/>
-                                  ))}
-                              </LineChart>
-                          </ResponsiveContainer>
+                          <NeonAnalyzerChart
+                            traces={getJobMetrics(activeJob.job_id)[0]?.zpe_effects?.map((_, idx) => ({
+                              data: getJobMetrics(activeJob.job_id).map(m => m.zpe_effects?.[idx] ?? 0),
+                              color: ['#ffe066', '#ff00ff', '#00ffe7', '#39ff14', '#ffffff'][idx % 5],
+                              label: `Layer ${idx + 1}`
+                            })) || []}
+                            width={600}
+                            height={320}
+                            overlays={[
+                              { text: 'ZPE Evolution', color: '#39ff14', x: 120, y: 40, fontSize: 24 },
+                              { text: `Model: ${activeJob?.parameters.modelName}`, color: '#00ffe7', x: 80, y: 300, fontSize: 16 }
+                            ]}
+                            showLegend
+                          />
                       </div>
                       <div className="mt-6">
                           <h3 className="text-sm font-medium mb-2">ZPE Dynamics Summary</h3>

@@ -1,4 +1,3 @@
-
 export interface GpuInfo {
   id?: string;
   name?: string;
@@ -29,6 +28,7 @@ export interface TrainingParameters {
   modelName: string;
   baseConfigId?: string | null; // Made optional and allow null
   channel_sizes?: number[]; // Add this line
+  mixupAlpha: number; // Add this line for mixupAlpha
 }
 
 export interface TrainingJob {

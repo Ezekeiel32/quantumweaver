@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Link from 'next/link';
 import {
   Home, Cpu, Zap, Atom, BarChart3, Settings, PlayCircle, Lightbulb,
@@ -29,18 +29,69 @@ const appFeatures = [
   { href: "/cloud-gpu", label: "Cloud GPU Connect", icon: Settings2, description: "Connect to third-party cloud GPU providers." },
 ];
 
+// Minimal type for job
+interface Job {
+  job_id: string;
+  model_name?: string;
+  status?: string;
+  accuracy?: number;
+  zpe_effects?: number[];
+  parameters?: {
+    modelName?: string;
+    quantumMode?: boolean;
+    keyFeature?: string;
+  };
+}
+
 export default function DashboardPage() {
-  const latestModelData = {
-    name: "TetraNet-Sigma7",
-    accuracy: 99.17,
+  const [latestJob, setLatestJob] = useState<Job | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchLatestJob = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const jobsRes = await fetch("/api/jobs?limit=10");
+      const jobsData = await jobsRes.json();
+      const jobs: Job[] = (jobsData.jobs || []).filter((job: Job) => ["completed", "running", "stopped"].includes(job.status || ""));
+      if (jobs.length > 0) {
+        const latest = jobs[0];
+        const detailRes = await fetch(`/api/status/${latest.job_id}`);
+        const detail: Job = await detailRes.json();
+        setLatestJob({ ...latest, ...detail });
+      } else {
+        setLatestJob(null);
+      }
+    } catch (e) {
+      setLatestJob(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLatestJob();
+  }, [fetchLatestJob]);
+
+  // Fallback if no job
+  const latestModelData = latestJob ? {
+    name: latestJob.parameters?.modelName || latestJob.model_name || "-",
+    accuracy: latestJob.accuracy || 0,
+    zpeLayers: Array.isArray(latestJob.zpe_effects) ? latestJob.zpe_effects.length : 6,
+    avgZPEEffect: Array.isArray(latestJob.zpe_effects) && latestJob.zpe_effects.length > 0 ? (latestJob.zpe_effects.reduce((a: number, b: number) => a + b, 0) / latestJob.zpe_effects.length) : 0,
+    quantumMode: latestJob.parameters?.quantumMode ?? false,
+    keyFeature: latestJob.parameters?.keyFeature || "-"
+  } : {
+    name: "-",
+    accuracy: 0,
     zpeLayers: 6, 
-    avgZPEEffect: 0.138, 
-    quantumMode: true,
-    keyFeature: "Adaptive ZPE Coupling with Quantum Noise Modulation"
+    avgZPEEffect: 0,
+    quantumMode: false,
+    keyFeature: "-"
   };
 
   return (
     <div className="p-1 md:p-2 space-y-6">
+      <div className="matrix-panel">
       <Card className="shadow-lg border-primary/20 bg-card/80 backdrop-blur-sm">
         <CardHeader>
           <div className="flex items-center gap-3 mb-2">
@@ -66,8 +117,8 @@ export default function DashboardPage() {
 
           <Card className="bg-gradient-to-br from-card to-primary/5 border-primary/20">
             <CardHeader>
-              <CardTitle className="text-xl font-headline flex items-center gap-2"><TrendingUp className="h-5 w-5 text-accent"/>Latest Simulated Model Overview</CardTitle>
-              <CardDescription>Key statistics from the most recent conceptual model run.</CardDescription>
+                <CardTitle className="text-xl font-headline flex items-center gap-2"><TrendingUp className="h-5 w-5 text-accent"/>Latest Model Overview</CardTitle>
+                <CardDescription>Key statistics from the most recent real job run.</CardDescription>
             </CardHeader>
             <CardContent className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
               <div className="bg-background/70 p-3 rounded-md flex justify-between items-center ring-1 ring-inset ring-border">
@@ -75,7 +126,7 @@ export default function DashboardPage() {
                 <Badge variant="secondary" className="font-code">{latestModelData.name}</Badge>
               </div>
               <div className="bg-background/70 p-3 rounded-md flex justify-between items-center ring-1 ring-inset ring-border">
-                <span className="text-muted-foreground">Sim. Accuracy:</span>
+                  <span className="text-muted-foreground">Accuracy:</span>
                 <Badge className="bg-green-500/20 text-green-400 border-green-600/50 font-semibold">{latestModelData.accuracy}%</Badge>
               </div>
               <div className="bg-background/70 p-3 rounded-md flex justify-between items-center ring-1 ring-inset ring-border">
@@ -98,6 +149,7 @@ export default function DashboardPage() {
           </Card>
         </CardContent>
       </Card>
+      </div>
 
       <div>
         <h2 className="text-2xl font-headline mb-6 tracking-tight flex items-center gap-2">

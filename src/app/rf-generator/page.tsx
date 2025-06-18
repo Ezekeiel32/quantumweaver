@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Signal, Activity, SlidersHorizontal, Radio, Zap, Rss } from 'lucide-react';
 import { Tooltip } from "@/components/ui/tooltip";
+import NeonAnalyzerChart from '@/components/visualizations/NeonAnalyzerChart';
 
 // Helper to generate waveform data
 const generateWaveData = (params: RfParamsType) => {
@@ -186,6 +187,19 @@ export default function RfWaveGeneratorPage() {
           ))}
         </>
       )}
+      <div className="h-64 w-full mb-4">
+        <NeonAnalyzerChart
+          traces={[
+            { data: waveData.map(d => d.value), color: '#00ffe7', label: 'RF Waveform' },
+          ]}
+          width={600}
+          height={220}
+          overlays={[
+            { text: `${rfParams.waveform.charAt(0).toUpperCase() + rfParams.waveform.slice(1)} Wave`, color: '#39ff14', x: 120, y: 40, fontSize: 20 },
+          ]}
+          showLegend
+        />
+      </div>
     </CardContent>
   );
 } 

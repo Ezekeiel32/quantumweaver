@@ -26,6 +26,7 @@ import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { TooltipProvider, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { defaultZPEParams } from "@/lib/constants";
+import NeonAnalyzerChart from "@/components/visualizations/NeonAnalyzerChart";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
 
@@ -233,34 +234,34 @@ export default function TrainModelPage() {
         throw new Error(`Failed to fetch job status for ${jobId}`);
       }
       const jobData: TrainingJob = await response.json();
-        setActiveJob(jobData);
-        if (jobData.status === "running" || jobData.status === "completed") {
-          const newPoint = {
-            epoch: jobData.current_epoch,
-            accuracy: jobData.accuracy,
-            loss: jobData.loss,
-            avg_zpe: jobData.zpe_effects && jobData.zpe_effects.length > 0 ? jobData.zpe_effects.reduce((a,b)=>a+b,0) / (jobData.zpe_effects.length) : 0
-          };
-          setChartData(prev => {
-            const existingPointIndex = prev.findIndex(p => p.epoch === newPoint.epoch);
-            if (existingPointIndex > -1) {
-              const updatedPrev = [...prev];
-              updatedPrev[existingPointIndex] = newPoint;
-              return updatedPrev;
-            }
-            return [...prev, newPoint].sort((a,b) => a.epoch - b.epoch);
-          });
+      setActiveJob(jobData);
+      if (jobData.status === "running" || jobData.status === "completed") {
+        const newPoint = {
+          epoch: jobData.current_epoch,
+          accuracy: jobData.accuracy,
+          loss: jobData.loss,
+          avg_zpe: jobData.zpe_effects && jobData.zpe_effects.length > 0 ? jobData.zpe_effects.reduce((a,b)=>a+b,0) / (jobData.zpe_effects.length) : 0
+        };
+        setChartData(prev => {
+          const existingPointIndex = prev.findIndex(p => p.epoch === newPoint.epoch);
+          if (existingPointIndex > -1) {
+            const updatedPrev = [...prev];
+            updatedPrev[existingPointIndex] = newPoint;
+            return updatedPrev;
+          }
+          return [...prev, newPoint].sort((a,b) => a.epoch - b.epoch);
+        });
         // Save ZPE stats for advisor dataset
         const zpeHistory = parseLogMessagesToZpeHistory(jobData.log_messages || []);
         saveZpeStatsToDataset(jobId, jobData.log_messages || [], zpeHistory);
-        }
-        if (jobData.status === "completed" || jobData.status === "failed" || jobData.status === "stopped") {
-          stopPolling();
-          fetchJobsList();
-          toast({ 
-            title: `Job ${jobData.status}`, 
-            description: `Job ${jobId.replace('zpe_job_','')} (${jobData.parameters.modelName}) finished with status: ${jobData.status}. Accuracy: ${jobData.accuracy.toFixed(2)}%` 
-          });
+      }
+      if (jobData.status === "completed" || jobData.status === "failed" || jobData.status === "stopped") {
+        stopPolling();
+        fetchJobsList();
+        toast({ 
+          title: `Job ${jobData.status}`, 
+          description: `Job ${jobId.replace('zpe_job_','')} (${jobData.parameters.modelName}) finished with status: ${jobData.status}. Accuracy: ${jobData.accuracy.toFixed(2)}%` 
+        });
       }
     } catch (error: any) {
       console.error("Error polling job status:", error);
@@ -547,7 +548,8 @@ export default function TrainModelPage() {
     if (advisorParams) {
       try {
         const parsed = JSON.parse(decodeURIComponent(advisorParams));
-        reset(parsed);
+        // Ensure baseConfigId is preserved if present
+        reset({ ...defaultFormValues, ...parsed, baseConfigId: parsed.baseConfigId });
         toast({ title: "Advisor Parameters Loaded", description: "Parameters from the HS-QNN Advisor have been loaded into the form." });
       } catch (e) {
         toast({ title: "Failed to load advisor parameters", description: String(e), variant: "destructive" });
@@ -620,25 +622,31 @@ export default function TrainModelPage() {
   const [hoveredAction, setHoveredAction] = useState<{ jobId: string; action: string; x: number; y: number } | null>(null);
 
   useEffect(() => {
-    // Start polling for the active job if it is running or pending
-    if (activeJob && (activeJob.status === 'running' || activeJob.status === 'pending')) {
-      if (!isPollingRef.current) {
-        pollingRef.current = setInterval(() => {
+    let pollInterval: NodeJS.Timeout | null = null;
+
+    const startPolling = () => {
+      if (activeJob && (activeJob.status === 'running' || activeJob.status === 'pending')) {
+        // Poll immediately and then set up interval
+        pollJobStatus(activeJob.job_id, false);
+        pollInterval = setInterval(() => {
           pollJobStatus(activeJob.job_id, false);
-        }, 2000);
-        isPollingRef.current = true;
-        console.log(`Started polling for job ${activeJob.job_id}`);
+        }, 1000); // Reduced to 1 second for more frequent updates
       }
-    } else {
-      // Stop polling if job is not running or pending
-      stopPolling();
-    }
-    // Clean up polling on unmount or job change
+    };
+
+    const stopPolling = () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    };
+
+    startPolling();
+
     return () => {
       stopPolling();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeJob?.job_id, activeJob?.status]);
+  }, [activeJob?.job_id, activeJob?.status, pollJobStatus]);
 
   // Add a handler to load PTH file when loading advice from advisor
   const handleAdvisorApplyParameters = (params: TrainingParameters, previousJobId?: string) => {
@@ -653,9 +661,14 @@ export default function TrainModelPage() {
     };
     reset(safeParams);
     setFormKey(prevKey => prevKey + 1);
-    // If previousJobId is provided, trigger PTH file loading (placeholder)
     if (previousJobId) {
-      setContinueFromJobId(previousJobId);
+      setValue('baseConfigId', previousJobId);
+      setTrainMode('continue'); // Set immediately for UI feedback
+      fetch(`${API_BASE_URL}/status/${previousJobId}`)
+        .then(res => res.json())
+        .then(job => {
+          setJobToPrefill(job);
+        });
     }
   };
 
@@ -668,11 +681,10 @@ export default function TrainModelPage() {
     onSubmit({ ...data, baseConfigId: undefined });
   });
   const handleContinueTraining = handleSubmit((data) => {
-    if (jobToPrefill) {
-      setValue('baseConfigId', jobToPrefill.job_id);
-      setTrainMode('continue');
-      onSubmit({ ...data, baseConfigId: jobToPrefill.job_id });
-    }
+    // Always use baseConfigId from the form if present
+    const baseConfigId = data.baseConfigId;
+    setTrainMode('continue');
+    onSubmit({ ...data, baseConfigId });
   });
 
   return (
@@ -734,7 +746,7 @@ export default function TrainModelPage() {
                   type="button"
                   variant={trainMode === 'continue' ? 'default' : 'outline'}
                   onClick={handleContinueTraining}
-                  disabled={isSubmitting || !jobToPrefill}
+                  disabled={isSubmitting || !((watch('baseConfigId') ?? '').length > 0)}
                 >
                   Train on Previously Trained Model (.pth)
                         </Button>
@@ -782,20 +794,55 @@ export default function TrainModelPage() {
                   <MetricDisplay label="Loss" value={activeJob.loss.toFixed(4)} />
                   <MetricDisplay label="Avg ZPE" value={(activeJob.zpe_effects && activeJob.zpe_effects.length > 0 ? activeJob.zpe_effects.reduce((a, b) => a + b, 0) / activeJob.zpe_effects.length : 0).toFixed(2)} />
                 </div>
-                <div className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="epoch" />
-                      <YAxis yAxisId="left" orientation="left" stroke="#8884d8" />
-                      <YAxis yAxisId="right" orientation="right" stroke="#82ca9d" />
-                      <Tooltip />
-                      <Legend />
-                      <Line yAxisId="left" type="monotone" dataKey="accuracy" name="Accuracy (%)" stroke="#8884d8" activeDot={{ r: 8 }} />
-                      <Line yAxisId="left" type="monotone" dataKey="loss" name="Loss" stroke="#ff7300" />
-                      <Line yAxisId="right" type="monotone" dataKey="avg_zpe" name="Avg ZPE" stroke="#82ca9d" />
-                    </LineChart>
-                  </ResponsiveContainer>
+                <div className="flex-1 w-full flex items-center justify-center" style={{ minHeight: 420, padding: 0, margin: 0 }}>
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <div
+                      className="neon-border"
+                      style={{
+                        width: 'calc(100% - 16px)',
+                        height: 'calc(100% - 16px)',
+                        margin: 8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: 'transparent',
+                        boxSizing: 'border-box',
+                      }}
+                    >
+                      <div
+                        style={{
+                          background: 'rgba(10,20,40,0.85)',
+                          width: 'calc(100% - 16px)',
+                          height: 'calc(100% - 16px)',
+                          margin: 8,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <NeonAnalyzerChart
+                          traces={[
+                            { data: chartData.map((d) => d.train_acc), color: '#00ffe7', label: 'Train Acc' },
+                            { data: chartData.map((d) => d.val_acc), color: '#ff00ff', label: 'Val Acc' },
+                          ]}
+                          width={600}
+                          height={380}
+                          overlays={[
+                            { text: 'Training Metrics', color: '#39ff14', x: 120, y: 40, fontSize: 24 },
+                          ]}
+                          showLegend
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <ScrollArea className="h-[200px] w-full rounded-md border">
                   <div className="p-4">

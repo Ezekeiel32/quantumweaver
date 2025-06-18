@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useCallback, useContext, createContext } from "react";
+import React, { useState, useEffect, useCallback, useContext, createContext, useRef } from "react";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -78,6 +78,80 @@ export function useAdvisorContext() {
   return ctx;
 }
 
+// Custom DraggableModal wrapper
+function DraggableModal({ children }: { children: React.ReactNode }) {
+  const nodeRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDragging(true);
+    setOffset({
+      x: e.clientX - pos.x,
+      y: e.clientY - pos.y,
+    });
+  };
+
+  const onMouseMove = (e: MouseEvent) => {
+    if (dragging) {
+      setPos({
+        x: e.clientX - offset.x,
+        y: e.clientY - offset.y,
+      });
+    }
+  };
+
+  const onMouseUp = () => setDragging(false);
+
+  React.useEffect(() => {
+    if (dragging) {
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    } else {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    }
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  });
+
+  return (
+    <div
+      ref={nodeRef}
+      style={{
+        position: "fixed",
+        left: `calc(50% + ${pos.x}px)`,
+        top: `calc(50% + ${pos.y}px)`,
+        zIndex: 1300,
+        transform: "translate(-50%, -50%)",
+      }}
+    >
+      {React.Children.map(children, (child: any) =>
+        React.cloneElement(child, {
+          // Pass down the drag handle to DialogTitle
+          children: React.Children.map(child.props.children, (modalChild: any) => {
+            if (
+              modalChild &&
+              modalChild.type &&
+              modalChild.type.displayName === "DialogTitle"
+            ) {
+              return React.cloneElement(modalChild, {
+                className: (modalChild.props.className || "") + " cursor-move",
+                onMouseDown,
+              });
+            }
+            return modalChild;
+          }),
+        })
+      )}
+    </div>
+  );
+}
+
 export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParameters, onSaveConfig, fullMode = false, className }) => {
   const { completedJobs, setCompletedJobs, selectedJobId, setSelectedJobId, advisorObjective, setAdvisorObjective, advisorResult, setAdvisorResult, selectedJobDetails, setSelectedJobDetails, isLoading, setIsLoading, error, setError, isLoadingJobs, setIsLoadingJobs } = useAdvisorContext();
   const router = useRouter();
@@ -93,6 +167,39 @@ export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParam
   const [expandedSuggestedParams, setExpandedSuggestedParams] = useState(false);
 
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
+
+  // --- Suggestion Memory ---
+  // Key for localStorage
+  const suggestionKey = selectedJobId ? `hsqnn_advisor_suggestion_${selectedJobId}` : null;
+
+  // Load suggestion from localStorage on mount or when job changes
+  useEffect(() => {
+    if (!suggestionKey) return;
+    const stored = localStorage.getItem(suggestionKey);
+    if (stored) {
+      try {
+        setAdvisorResult(JSON.parse(stored));
+      } catch {}
+    } else {
+      setAdvisorResult(null);
+    }
+  }, [suggestionKey]);
+
+  // Save suggestion to localStorage when advisorResult changes
+  useEffect(() => {
+    if (!suggestionKey) return;
+    if (advisorResult) {
+      localStorage.setItem(suggestionKey, JSON.stringify(advisorResult));
+    }
+  }, [advisorResult, suggestionKey]);
+
+  // Clear suggestion from localStorage
+  const clearSuggestion = () => {
+    if (suggestionKey) localStorage.removeItem(suggestionKey);
+    setAdvisorResult(null);
+  };
+
+  // --- End Suggestion Memory ---
 
   const fetchCompletedJobs = useCallback(async () => {
     setIsLoadingJobs(true);
@@ -194,6 +301,7 @@ export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParam
     setIsLoading(true);
     setError(null);
     setAdvisorResult(null);
+    if (suggestionKey) localStorage.removeItem(suggestionKey);
     const zpeHistory = parseLogMessagesToZpeHistory(selectedJobDetails.log_messages || []);
     const zpeHistoryString = zpeHistory
       .map(entry => `Epoch ${entry.epoch}: ZPE=[${entry.zpe_effects.map((z: number) => z.toFixed(3)).join(', ')}], Loss=${entry.loss.toFixed(4)}, Acc=${entry.accuracy.toFixed(4)}`)
@@ -255,14 +363,15 @@ export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParam
   };
 
   return (
-    <Card className={className}>
+    <div className="matrix-panel">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
           <Wand2 className="h-5 w-5 text-primary" />
           {fullMode ? "HS-QNN Advisor" : "Mini HS-QNN Advisor"}
-          <Button size="icon" variant="ghost" className="ml-auto" onClick={handleGetAdvice} disabled={isLoading} title="Refresh AI Suggestion">
+          {/* Manual Refresh Button */}
+          <button className="instrument-btn ml-2" onClick={handleGetAdvice} disabled={isLoading} title="Refresh AI Suggestion">
             <RefreshCw className={isLoading ? "animate-spin" : ""} />
-          </Button>
+          </button>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -290,9 +399,9 @@ export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParam
           <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowObjective(v => !v)}>
             <Label htmlFor="advisorObjective">Advisor Objective</Label>
             <div className="flex items-center gap-1">
-              <Button size="icon" variant="ghost" className="p-0 h-6 w-6 text-accent/70 hover:text-accent transition-colors" onClick={e => { e.stopPropagation(); setExpandedObjective(true); }} title="Expand" tabIndex={-1}>
+              <button className="instrument-btn p-0 h-6 w-6 text-accent/70 hover:text-accent transition-colors" onClick={e => { e.stopPropagation(); setExpandedObjective(true); }} title="Expand" tabIndex={-1}>
                 <Maximize2 className="h-3.5 w-3.5" />
-              </Button>
+              </button>
               {showObjective ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </div>
           </div>
@@ -307,8 +416,9 @@ export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParam
           )}
           {/* Expanded Modal for Objective */}
           <Dialog open={expandedObjective} onOpenChange={setExpandedObjective}>
+            <DraggableModal>
             <DialogContent className="max-w-2xl z-[1200]">
-              <DialogTitle>Advisor Objective</DialogTitle>
+                <DialogTitle className="dialog-title">Advisor Objective</DialogTitle>
               <Textarea
                 value={advisorObjective}
                 onChange={e => setAdvisorObjective(e.target.value)}
@@ -316,6 +426,7 @@ export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParam
                 autoFocus
               />
             </DialogContent>
+            </DraggableModal>
           </Dialog>
         </div>
         {/* Collapsible Job Details */}
@@ -324,9 +435,9 @@ export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParam
             <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowJobDetails(v => !v)}>
               <Label>Selected Job Details</Label>
               <div className="flex items-center gap-1">
-                <Button size="icon" variant="ghost" className="p-0 h-6 w-6 text-accent/70 hover:text-accent transition-colors" onClick={e => { e.stopPropagation(); setExpandedJobDetails(true); }} title="Expand" tabIndex={-1}>
+                <button className="instrument-btn p-0 h-6 w-6 text-accent/70 hover:text-accent transition-colors" onClick={e => { e.stopPropagation(); setExpandedJobDetails(true); }} title="Expand" tabIndex={-1}>
                   <Maximize2 className="h-3.5 w-3.5" />
-                </Button>
+                </button>
                 {showJobDetails ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               </div>
             </div>
@@ -337,12 +448,14 @@ export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParam
             )}
             {/* Expanded Modal for Job Details */}
             <Dialog open={expandedJobDetails} onOpenChange={setExpandedJobDetails}>
+              <DraggableModal>
               <DialogContent className="max-w-2xl z-[1200]">
-                <DialogTitle>Selected Job Details</DialogTitle>
+                  <DialogTitle className="dialog-title">Selected Job Details</DialogTitle>
                 <pre className="p-4 bg-muted rounded-md text-sm overflow-auto max-h-[60vh]">
                   {JSON.stringify(selectedJobDetails.parameters, null, 2)}
                 </pre>
               </DialogContent>
+              </DraggableModal>
             </Dialog>
           </div>
         )}
@@ -358,9 +471,9 @@ export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParam
             <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowReasoning(v => !v)}>
               <Label>Advisor Reasoning</Label>
               <div className="flex items-center gap-1">
-                <Button size="icon" variant="ghost" className="p-0 h-6 w-6 text-accent/70 hover:text-accent transition-colors" onClick={e => { e.stopPropagation(); setExpandedReasoning(true); }} title="Expand" tabIndex={-1}>
+                <button className="instrument-btn p-0 h-6 w-6 text-accent/70 hover:text-accent transition-colors" onClick={e => { e.stopPropagation(); setExpandedReasoning(true); }} title="Expand" tabIndex={-1}>
                   <Maximize2 className="h-3.5 w-3.5" />
-                </Button>
+                </button>
                 {showReasoning ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               </div>
             </div>
@@ -371,20 +484,22 @@ export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParam
             )}
             {/* Expanded Modal for Reasoning */}
             <Dialog open={expandedReasoning} onOpenChange={setExpandedReasoning}>
+              <DraggableModal>
               <DialogContent className="max-w-2xl z-[1200]">
-                <DialogTitle>Advisor Reasoning</DialogTitle>
+                  <DialogTitle className="dialog-title">Advisor Reasoning</DialogTitle>
                 <pre className="p-4 bg-muted rounded-md text-sm whitespace-pre-wrap overflow-auto max-h-[60vh]">
                   {advisorResult.reasoning || "No reasoning provided."}
                 </pre>
               </DialogContent>
+              </DraggableModal>
             </Dialog>
             {/* Collapsible Suggested Parameters */}
             <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowSuggestedParams(v => !v)}>
               <Label>Suggested Parameters</Label>
               <div className="flex items-center gap-1">
-                <Button size="icon" variant="ghost" className="p-0 h-6 w-6 text-accent/70 hover:text-accent transition-colors" onClick={e => { e.stopPropagation(); setExpandedSuggestedParams(true); }} title="Expand" tabIndex={-1}>
+                <button className="instrument-btn p-0 h-6 w-6 text-accent/70 hover:text-accent transition-colors" onClick={e => { e.stopPropagation(); setExpandedSuggestedParams(true); }} title="Expand" tabIndex={-1}>
                   <Maximize2 className="h-3.5 w-3.5" />
-                </Button>
+                </button>
                 {showSuggestedParams ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               </div>
             </div>
@@ -395,26 +510,28 @@ export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParam
             )}
             {/* Expanded Modal for Suggested Parameters */}
             <Dialog open={expandedSuggestedParams} onOpenChange={setExpandedSuggestedParams}>
+              <DraggableModal>
               <DialogContent className="max-w-2xl z-[1200]">
-                <DialogTitle>Suggested Parameters</DialogTitle>
+                  <DialogTitle className="dialog-title">Suggested Parameters</DialogTitle>
                 <pre className="p-4 bg-muted rounded-md text-sm overflow-auto max-h-[60vh]">
                   {JSON.stringify(advisorResult.suggestedNextTrainingParameters, null, 2)}
                 </pre>
               </DialogContent>
+              </DraggableModal>
             </Dialog>
             <div className="flex gap-2">
-              <Button onClick={handleLoadInTrainer} disabled={isLoading}>
+              <button className="instrument-btn" onClick={handleLoadInTrainer} disabled={isLoading}>
                 <Wand2 className="mr-2 h-4 w-4" /> Load in Trainer
-              </Button>
-              <Button variant="outline" onClick={handleSaveConfig} disabled={isLoading}>
+              </button>
+              <button className="instrument-btn" onClick={handleSaveConfig} disabled={isLoading}>
                 <Save className="mr-2 h-4 w-4" /> Save Config
-              </Button>
+              </button>
             </div>
           </div>
         )}
       </CardContent>
       <CardFooter>
-        <Button onClick={handleGetAdvice} disabled={isLoading || !selectedJobId}>
+        <button className="instrument-btn" onClick={handleGetAdvice} disabled={isLoading || !selectedJobId}>
           {isLoading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating Advice...
@@ -424,8 +541,8 @@ export const MiniHSQNNAdvisor: React.FC<MiniHSQNNAdvisorProps> = ({ onApplyParam
               <Wand2 className="mr-2 h-4 w-4" /> Get HNN Advice
             </>
           )}
-        </Button>
+        </button>
       </CardFooter>
-    </Card>
+    </div>
   );
 }; 

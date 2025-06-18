@@ -11,43 +11,46 @@ interface FloatingMiniAdvisorProps {
 }
 
 export default function FloatingMiniAdvisor({ onApplyParameters, onSaveConfig, defaultMinimized = false }: FloatingMiniAdvisorProps) {
+  // All hooks at the top, always called
   const [isExpanded, setIsExpanded] = useState(false);
   const [isMinimized, setIsMinimized] = useState(defaultMinimized);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [dragging, setDragging] = useState(false);
-  const dragStart = useRef<{ x: number; y: number; mouseX: number; mouseY: number } | null>(null);
   const [size, setSize] = useState({ width: 420, height: 520 });
-  const resizeStart = useRef<{ width: number; height: number; mouseX: number; mouseY: number } | null>(null);
+  const [expandedPosition, setExpandedPosition] = useState({ top: 64, left: 64 });
+  const minimizedPosition = { bottom: 32, right: 32 };
+  const [isClient, setIsClient] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef<{ top: number; left: number; mouseX: number; mouseY: number } | null>(null);
   const [resizing, setResizing] = useState(false);
+  const [resizeDirection, setResizeDirection] = useState<string | null>(null);
+  const resizeStart = useRef<{ width: number; height: number; mouseX: number; mouseY: number; direction: string; top: number; left: number } | null>(null);
 
-  // Calculate initial position: bottom right
-  const initialBottom = 32;
-  const initialRight = 32;
-
-  // Handlers for drag
-  const onMouseDown = (e: React.MouseEvent) => {
-    setDragging(true);
-    dragStart.current = {
-      x: position.x,
-      y: position.y,
-      mouseX: e.clientX,
-      mouseY: e.clientY,
+  // Effects
+  React.useEffect(() => {
+    setIsClient(true);
+    const updatePosition = () => {
+      const top = Math.max(32, window.innerHeight - 520 - 32);
+      const left = Math.max(32, window.innerWidth - 420 - 32);
+      setExpandedPosition({ top, left });
     };
-    document.body.style.userSelect = "none";
-  };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    return () => window.removeEventListener('resize', updatePosition);
+  }, []);
+
   const onMouseMove = (e: MouseEvent) => {
     if (!dragging || !dragStart.current) return;
     const dx = e.clientX - dragStart.current.mouseX;
     const dy = e.clientY - dragStart.current.mouseY;
-    setPosition({ x: dragStart.current.x + dx, y: dragStart.current.y + dy });
+    setExpandedPosition({
+      top: dragStart.current.top + dy,
+      left: dragStart.current.left + dx,
+    });
   };
   const onMouseUp = () => {
     setDragging(false);
     dragStart.current = null;
     document.body.style.userSelect = "";
   };
-
-  // Attach/detach listeners
   React.useEffect(() => {
     if (dragging) {
       window.addEventListener("mousemove", onMouseMove);
@@ -60,32 +63,57 @@ export default function FloatingMiniAdvisor({ onApplyParameters, onSaveConfig, d
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
-    // eslint-disable-next-line
   }, [dragging]);
 
-  // Resize handlers
-  const onResizeMouseDown = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setResizing(true);
-    resizeStart.current = {
-      width: size.width,
-      height: size.height,
-      mouseX: e.clientX,
-      mouseY: e.clientY,
-    };
-    document.body.style.userSelect = "none";
-  };
   const onResizeMouseMove = (e: MouseEvent) => {
     if (!resizing || !resizeStart.current) return;
     const dx = e.clientX - resizeStart.current.mouseX;
     const dy = e.clientY - resizeStart.current.mouseY;
-    setSize({
-      width: Math.max(320, Math.min(700, resizeStart.current.width + dx)),
-      height: Math.max(320, Math.min(900, resizeStart.current.height + dy)),
-    });
+    let newWidth = size.width;
+    let newHeight = size.height;
+    let newTop = expandedPosition.top;
+    let newLeft = expandedPosition.left;
+    const dir = resizeStart.current.direction;
+    if (dir === "right") {
+      newWidth = Math.max(minWidth, Math.min(maxWidth, resizeStart.current.width + dx));
+    }
+    if (dir === "left") {
+      newWidth = Math.max(minWidth, Math.min(maxWidth, resizeStart.current.width - dx));
+      newLeft = resizeStart.current.left + dx;
+    }
+    if (dir === "bottom") {
+      newHeight = Math.max(minHeight, Math.min(maxHeight, resizeStart.current.height + dy));
+    }
+    if (dir === "top") {
+      newHeight = Math.max(minHeight, Math.min(maxHeight, resizeStart.current.height - dy));
+      newTop = resizeStart.current.top + dy;
+    }
+    if (dir === "top-left") {
+      newWidth = Math.max(minWidth, Math.min(maxWidth, resizeStart.current.width - dx));
+      newHeight = Math.max(minHeight, Math.min(maxHeight, resizeStart.current.height - dy));
+      newLeft = resizeStart.current.left + dx;
+      newTop = resizeStart.current.top + dy;
+    }
+    if (dir === "top-right") {
+      newWidth = Math.max(minWidth, Math.min(maxWidth, resizeStart.current.width + dx));
+      newHeight = Math.max(minHeight, Math.min(maxHeight, resizeStart.current.height - dy));
+      newTop = resizeStart.current.top + dy;
+    }
+    if (dir === "bottom-left") {
+      newWidth = Math.max(minWidth, Math.min(maxWidth, resizeStart.current.width - dx));
+      newHeight = Math.max(minHeight, Math.min(maxHeight, resizeStart.current.height + dy));
+      newLeft = resizeStart.current.left + dx;
+    }
+    if (dir === "bottom-right") {
+      newWidth = Math.max(minWidth, Math.min(maxWidth, resizeStart.current.width + dx));
+      newHeight = Math.max(minHeight, Math.min(maxHeight, resizeStart.current.height + dy));
+    }
+    setSize({ width: newWidth, height: newHeight });
+    setExpandedPosition({ top: newTop, left: newLeft });
   };
   const onResizeMouseUp = () => {
     setResizing(false);
+    setResizeDirection(null);
     resizeStart.current = null;
     document.body.style.userSelect = "";
   };
@@ -103,35 +131,96 @@ export default function FloatingMiniAdvisor({ onApplyParameters, onSaveConfig, d
     };
   }, [resizing]);
 
-  // Make window draggable from all margins except interactive elements
+  // Only after all hooks, do a conditional render
+  if (!isClient) return <div style={{ display: 'none' }} />;
+
+  // Drag logic using top/left
+  const onMouseDown = (e: React.MouseEvent) => {
+    setDragging(true);
+    dragStart.current = {
+      top: expandedPosition.top,
+      left: expandedPosition.left,
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+    };
+    document.body.style.userSelect = "none";
+  };
+
+  // Update resize logic to use top/left for left/top handles
+  const minWidth = 320;
+  const maxWidth = 700;
+  const minHeight = 320;
+  const maxHeight = 900;
+
+  const onResizeMouseDown = (direction: string) => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setResizing(true);
+    setResizeDirection(direction);
+    resizeStart.current = {
+      width: size.width,
+      height: size.height,
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      direction,
+      top: expandedPosition.top,
+      left: expandedPosition.left,
+    };
+    document.body.style.userSelect = "none";
+  };
+
+  // Resize handle styles (6px at edge/corner)
+  const handleStyle = (cursor: string, top?: string, right?: string, bottom?: string, left?: string, width?: string, height?: string) => ({
+    position: "absolute" as const,
+    zIndex: 1100,
+    width: width || (cursor.includes("ew-resize") ? "6px" : cursor.includes("-resize") ? "6px" : "100%"),
+    height: height || (cursor.includes("ns-resize") ? "6px" : cursor.includes("-resize") ? "6px" : "100%"),
+    top,
+    right,
+    bottom,
+    left,
+    cursor,
+    background: "transparent",
+    userSelect: "none" as const,
+  });
+
+  // Helper to check if event is on a resize handle
+  const isOnResizeHandle = (e: React.MouseEvent) => {
+    const el = e.target as HTMLElement;
+    return el.classList.contains("resize-handle");
+  };
+
+  // Only drag if not on a resize handle
   const onWindowMouseDown = (e: React.MouseEvent) => {
-    // Only drag if not clicking on a button, input, textarea, select, or the resize handle
     const tag = (e.target as HTMLElement).tagName.toLowerCase();
     if (["button", "input", "textarea", "select", "svg", "path"].includes(tag)) return;
-    // Also check for resize handle
-    if ((e.target as HTMLElement).classList.contains("resize-handle")) return;
+    if (isOnResizeHandle(e)) return;
     onMouseDown(e);
   };
 
   if (isMinimized) {
     return (
       <div
+        className="fixed z-[1200] neon-border glass shadow-2xl"
         style={{
-          position: "fixed",
-          bottom: initialBottom - position.y,
-          right: initialRight - position.x,
-          zIndex: 1000,
-          maxWidth: 420,
+          bottom: 32,
+          right: 32,
+          width: 80,
+          height: 80,
+          borderRadius: 16,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 0 24px #00ffe7, 0 0 48px #00aaff',
+          background: 'rgba(20, 20, 40, 0.92)',
         }}
       >
         <Button
-          variant="secondary"
-          className="rounded-full shadow-lg px-4 py-2 flex items-center gap-2"
+          variant="ghost"
+          className="rounded-full p-0 m-0 h-16 w-16 flex items-center justify-center neon-btn"
           onClick={() => setIsMinimized(false)}
+          aria-label="Expand Advisor"
         >
-          <Sparkles className="h-5 w-5 text-accent" />
-          <span className="font-semibold">HS-QNN Mini Advisor</span>
-          <Square className="h-4 w-4 ml-1" />
+          <Sparkles className="h-8 w-8 text-neon-cyan animate-pulse" />
         </Button>
       </div>
     );
@@ -141,19 +230,31 @@ export default function FloatingMiniAdvisor({ onApplyParameters, onSaveConfig, d
     <div
       style={{
         position: "fixed",
-        bottom: initialBottom - position.y,
-        right: initialRight - position.x,
+        top: expandedPosition.top,
+        left: expandedPosition.left,
         zIndex: 1000,
         width: size.width,
         height: size.height,
-        maxWidth: 700,
-        maxHeight: 900,
-        minWidth: 320,
-        minHeight: 320,
+        maxWidth: maxWidth,
+        maxHeight: maxHeight,
+        minWidth: minWidth,
+        minHeight: minHeight,
         boxSizing: "border-box",
+        overflow: "auto",
       }}
       onMouseDown={onWindowMouseDown}
     >
+      {/* Resize handles for all sides and corners (6px at edge/corner, with class for detection) */}
+      {/* Corners */}
+      <div className="resize-handle" style={handleStyle("nwse-resize", "0", undefined, undefined, "0", "6px", "6px")} onMouseDown={onResizeMouseDown("top-left")} />
+      <div className="resize-handle" style={handleStyle("nesw-resize", "0", "0", undefined, undefined, "6px", "6px")} onMouseDown={onResizeMouseDown("top-right")} />
+      <div className="resize-handle" style={handleStyle("nesw-resize", undefined, "0", "0", undefined, "6px", "6px")} onMouseDown={onResizeMouseDown("bottom-right")} />
+      <div className="resize-handle" style={handleStyle("nwse-resize", undefined, undefined, "0", "0", "6px", "6px")} onMouseDown={onResizeMouseDown("bottom-left")} />
+      {/* Sides */}
+      <div className="resize-handle" style={handleStyle("ns-resize", "0", "6px", undefined, "6px", undefined, "6px")} onMouseDown={onResizeMouseDown("top")} />
+      <div className="resize-handle" style={handleStyle("ew-resize", "6px", "0", "6px", undefined, "6px", undefined)} onMouseDown={onResizeMouseDown("right")} />
+      <div className="resize-handle" style={handleStyle("ns-resize", undefined, "6px", "0", "6px", undefined, "6px")} onMouseDown={onResizeMouseDown("bottom")} />
+      <div className="resize-handle" style={handleStyle("ew-resize", "6px", undefined, "6px", "0", "6px", undefined)} onMouseDown={onResizeMouseDown("left")} />
       <div className="rounded-2xl shadow-2xl border border-primary/20 bg-background dark:bg-zinc-900 backdrop-blur-lg overflow-hidden h-full flex flex-col">
         <div className="flex items-center justify-between border-b border-primary/10 bg-transparent select-none">
           <div className="flex-1 flex items-center px-6 py-4 text-lg font-bold text-primary bg-transparent">
@@ -180,14 +281,6 @@ export default function FloatingMiniAdvisor({ onApplyParameters, onSaveConfig, d
             onApplyParameters={onApplyParameters}
             onSaveConfig={onSaveConfig}
           />
-        </div>
-        <div
-          className="absolute bottom-2 right-2 w-6 h-6 flex items-center justify-center cursor-se-resize resize-handle z-50 bg-background/80 rounded-full hover:bg-accent/30 transition"
-          style={{ userSelect: "none" }}
-          onMouseDown={onResizeMouseDown}
-          title="Resize"
-        >
-          <MoveDiagonal className="h-4 w-4 text-accent" />
         </div>
       </div>
     </div>

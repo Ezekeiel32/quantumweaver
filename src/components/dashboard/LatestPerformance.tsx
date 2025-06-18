@@ -1,4 +1,3 @@
-
 "use client";
 import React, { useState, useEffect } from 'react';
 import { 
@@ -19,6 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton
+import NeonAnalyzerChart from '@/components/visualizations/NeonAnalyzerChart';
 
 interface PerformanceEpochData {
   epoch: number;
@@ -104,27 +104,18 @@ export default function LatestPerformance() {
         </CardHeader>
         <CardContent>
           <div className="h-96">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={performanceData.map(p => ({
-                  name: `Epoch ${p.epoch}`,
-                  "Train Acc": parseFloat(p.train_acc.toFixed(2)),
-                  "Val Acc": parseFloat(p.val_acc.toFixed(2))
-                }))}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border)/0.5)" />
-                <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} domain={[90, 100]} tickFormatter={(val) => `${val}%`}/>
-                <Tooltip 
-                  contentStyle={{ backgroundColor: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "var(--radius)"}} 
-                  labelStyle={{color: "hsl(var(--popover-foreground))"}}
-                  itemStyle={{color: "hsl(var(--popover-foreground))"}}
-                />
-                <Legend wrapperStyle={{fontSize: "12px"}}/>
-                <Line type="monotone" dataKey="Train Acc" stroke="hsl(var(--primary))" strokeWidth={2} dot={{r:3}} activeDot={{r:5}} />
-                <Line type="monotone" dataKey="Val Acc" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{r:3}} activeDot={{r:5}}/>
-              </LineChart>
-            </ResponsiveContainer>
+            <NeonAnalyzerChart
+              traces={[
+                { data: performanceData.map(p => p.train_acc), color: '#00ffe7', label: 'Train Acc' },
+                { data: performanceData.map(p => p.val_acc), color: '#ff00ff', label: 'Val Acc' },
+              ]}
+              width={600}
+              height={380}
+              overlays={[
+                { text: 'Training Metrics', color: '#39ff14', x: 120, y: 40, fontSize: 24 },
+              ]}
+              showLegend
+            />
           </div>
         </CardContent>
       </Card>
