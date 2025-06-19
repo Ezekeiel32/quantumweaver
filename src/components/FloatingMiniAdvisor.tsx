@@ -219,7 +219,7 @@ export default function FloatingMiniAdvisor({ onApplyParameters, onSaveConfig, d
           className="rounded-full p-0 m-0 h-16 w-16 flex items-center justify-center neon-btn"
           onClick={() => setIsMinimized(false)}
           aria-label="Expand Advisor"
-        >
+          >
           <Sparkles className="h-8 w-8 text-neon-cyan animate-pulse" />
         </Button>
       </div>

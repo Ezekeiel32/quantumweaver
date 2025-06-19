@@ -12,4 +12,5 @@ export const defaultZPEParams = {
   labelSmoothing: 0.1,
   quantumMode: true,
   baseConfigId: undefined,
+  mixupAlpha: 0.2,
 }; 

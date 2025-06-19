@@ -26,6 +26,11 @@ from sklearn.preprocessing import LabelEncoder
 import logging
 from src.lib.training_logger import TrainingLogger
 from mixup_alpha_advisor import router as mixup_alpha_router
+from fastapi.responses import JSONResponse
+from fastapi.requests import Request
+from fastapi.exception_handlers import RequestValidationError
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # GPU Monitoring Setup
 PYNVML_AVAILABLE = False
@@ -125,19 +130,25 @@ app.add_middleware(
 
 # Pydantic Models
 class TrainingParameters(BaseModel):
-    totalEpochs: int
-    batchSize: int
-    learningRate: float
-    weightDecay: float
-    momentumParams: List[float]
-    strengthParams: List[float]
-    noiseParams: List[float]
-    couplingParams: Optional[List[float]] = None
-    quantumCircuitSize: int
-    labelSmoothing: float
-    quantumMode: bool
-    modelName: str
-    baseConfigId: Optional[str] = None
+    total_epochs: int
+    batch_size: int
+    learning_rate: float
+    weight_decay: float
+    momentum_params: List[float]
+    strength_params: List[float]
+    noise_params: List[float]
+    coupling_params: Optional[List[float]] = None
+    quantum_circuit_size: int
+    label_smoothing: float
+    quantum_mode: bool
+    model_name: str
+    base_config_id: Optional[str] = None
+    mixup_alpha: Optional[float] = 0.2
+    channel_sizes: Optional[List[int]] = None
+    class Config:
+        extra = "allow"
+        allow_population_by_field_name = True
+        alias_generator = lambda s: s.lower() if s.islower() else ''.join(['_' + c.lower() if c.isupper() else c for c in s]).lstrip('_')
 
 class ModelConfig(BaseModel):
     id: Optional[str] = None
@@ -461,7 +472,7 @@ def run_training_job(job_id: str, params: TrainingParameters):
         else:
             active_jobs[job_id] = {
                 "job_id": job_id, "status": "failed", "log_messages": [f"Job ID {job_id} not found."],
-                "parameters": params.model_dump(), "total_epochs": params.totalEpochs,
+                "parameters": params.model_dump(), "total_epochs": params.total_epochs,
                 "current_epoch": 0, "accuracy": 0.0, "loss": 0.0, "zpe_effects": [],
                 "zpe_history": [], "start_time": datetime.now().isoformat(),
                 "end_time": datetime.now().isoformat(), "gpu_info": get_gpu_usage_info_internal()
@@ -471,7 +482,7 @@ def run_training_job(job_id: str, params: TrainingParameters):
 
     job_status = active_jobs[job_id]
     job_status["status"] = "running"
-    job_status["log_messages"].append(f"Starting PyTorch training: {params.modelName}")
+    job_status["log_messages"].append(f"Starting PyTorch training: {params.model_name}")
     job_status["start_time"] = datetime.now().isoformat()
     job_status["gpu_info"] = get_gpu_usage_info_internal()
     save_job_status(job_id)
@@ -488,20 +499,20 @@ def run_training_job(job_id: str, params: TrainingParameters):
         val_transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
         train_dataset_full = datasets.MNIST(root='./data_api', train=True, download=True, transform=train_transform)
         val_dataset = datasets.MNIST(root='./data_api', train=False, download=True, transform=val_transform)
-        train_loader = DataLoader(train_dataset_full, batch_size=params.batchSize, shuffle=True, num_workers=2, pin_memory=(device.type == 'cuda'))
-        val_loader = DataLoader(val_dataset, batch_size=params.batchSize, shuffle=False, num_workers=2, pin_memory=(device.type == 'cuda'))
+        train_loader = DataLoader(train_dataset_full, batch_size=params.batch_size, shuffle=True, num_workers=2, pin_memory=(device.type == 'cuda'))
+        val_loader = DataLoader(val_dataset, batch_size=params.batch_size, shuffle=False, num_workers=2, pin_memory=(device.type == 'cuda'))
         job_status["log_messages"].append(f"DataLoaders created. Train: {len(train_loader)}, Val: {len(val_loader)} batches.")
         model = ZPEDeepNet(input_channels=1, output_size=10, sequence_length=10).to(device)
-        criterion = nn.CrossEntropyLoss(label_smoothing=params.labelSmoothing)
-        optimizer = optim.Adam(model.parameters(), lr=params.learningRate, weight_decay=params.weightDecay)
-        scheduler = CosineAnnealingLR(optimizer, T_max=params.totalEpochs)
+        criterion = nn.CrossEntropyLoss(label_smoothing=params.label_smoothing)
+        optimizer = optim.Adam(model.parameters(), lr=params.learning_rate, weight_decay=params.weight_decay)
+        scheduler = CosineAnnealingLR(optimizer, T_max=params.total_epochs)
         job_status["log_messages"].append("Model & Optimizer initialized.")
         job_status["gpu_info"] = get_gpu_usage_info_internal()
         save_job_status(job_id)
 
         # === CONTINUE TRAINING LOGIC ===
-        if hasattr(params, 'baseConfigId') and params.baseConfigId:
-            prev_model_path = os.path.join(JOBS_DIR, f"{params.baseConfigId}_model.pth")
+        if hasattr(params, 'base_config_id') and params.base_config_id:
+            prev_model_path = os.path.join(JOBS_DIR, f"{params.base_config_id}_model.pth")
             if os.path.exists(prev_model_path):
                 try:
                     model.load_state_dict(torch.load(prev_model_path, map_location=device))
@@ -512,9 +523,9 @@ def run_training_job(job_id: str, params: TrainingParameters):
                     available = [f for f in os.listdir(JOBS_DIR) if f.endswith('_model.pth')]
                     job_status["log_messages"].append(f"Available model files: {available}")
             else:
-                job_status["log_messages"].append(f"No previous weights found for baseConfigId {params.baseConfigId}, starting fresh.")
+                job_status["log_messages"].append(f"No previous weights found for base_config_id {params.base_config_id}, starting fresh.")
 
-        for epoch in range(1, params.totalEpochs + 1):
+        for epoch in range(1, params.total_epochs + 1):
             if job_status["status"] == "stopped":
                 job_status["log_messages"].append("Training stopped.")
                 break
@@ -522,7 +533,7 @@ def run_training_job(job_id: str, params: TrainingParameters):
             epoch_start_time = time.time()
             model.train()
             epoch_loss_sum, num_batches_epoch = 0.0, 0
-            job_status["log_messages"].append(f"--- Epoch {epoch}/{params.totalEpochs} ---")
+            job_status["log_messages"].append(f"--- Epoch {epoch}/{params.total_epochs} ---")
             job_status["gpu_info"] = get_gpu_usage_info_internal()
             save_job_status(job_id)
 
@@ -583,10 +594,10 @@ def run_training_job(job_id: str, params: TrainingParameters):
             training_logger.log_epoch(
                 job_id=job_status.get("job_id", ""),
                 epoch=epoch,
-                total_epochs=params.totalEpochs,
+                total_epochs=params.total_epochs,
                 timestamp=datetime.now().isoformat(),
-                model_name=params.modelName,
-                base_config_id=getattr(params, "baseConfigId", ""),
+                model_name=params.model_name,
+                base_config_id=getattr(params, "base_config_id", ""),
                 train_loss=avg_epoch_train_loss,
                 val_loss=avg_epoch_val_loss,
                 val_accuracy=val_accuracy,
@@ -648,7 +659,7 @@ async def call_advise_hsqnn_parameters(job_id: str) -> str:
         # suggested_parameters = await advise_hsqnn_parameters_flow(previous_parameters=previous_parameters)
 
         # TEMPORARY PLACEHOLDER for the AI flow call
-        suggested_parameters = {"learningRate": previous_parameters.get("learningRate", 0.001) * 0.9, "batchSize": min(int(previous_parameters.get("batchSize", 32) * 1.5), 128), "quantumCircuitSize": previous_parameters.get("quantumCircuitSize", 10) + 1}
+        suggested_parameters = {"learning_rate": previous_parameters.get("learning_rate", 0.001) * 0.9, "batch_size": min(int(previous_parameters.get("batch_size", 32) * 1.5), 128), "quantum_circuit_size": previous_parameters.get("quantum_circuit_size", 10) + 1}
 
         return f"Suggested HS-QNN parameters for job {job_id}:\n{json.dumps(suggested_parameters, indent=2)}"
 
@@ -665,20 +676,25 @@ async def call_simulate_zpe(job_id: str) -> str:
 # API Endpoints
 @app.post("/api/train", summary="Start a training job")
 async def start_training_endpoint(params: TrainingParameters, background_tasks: BackgroundTasks):
-    job_id = f"zpe_job_{str(uuid.uuid4())[:8]}"
-    active_jobs[job_id] = {
-        "job_id": job_id, "status": "pending", "current_epoch": 0, "zpe_history": [],
-        "total_epochs": params.totalEpochs, "accuracy": 0.0, "loss": 0.0,
-        "zpe_effects": [0.0] * 6, "log_messages": [f"Init job: {params.modelName}"],
-        "parameters": params.model_dump(), "start_time": None, "end_time": None,
-        "gpu_info": get_gpu_usage_info_internal()
-    }
-    # If baseConfigId is provided, log it and ensure it is used for weight loading in run_training_job
-    if hasattr(params, 'baseConfigId') and params.baseConfigId:
-        active_jobs[job_id]["log_messages"].append(f"baseConfigId provided: {params.baseConfigId}. Will attempt to load weights from this job if available.")
-    save_job_status(job_id)
-    background_tasks.add_task(run_training_job, job_id, params)
-    return {"status": "training_started", "job_id": job_id}
+    print("[DEBUG] /api/train called. Params received:", params)
+    try:
+        job_id = f"zpe_job_{str(uuid.uuid4())[:8]}"
+        active_jobs[job_id] = {
+            "job_id": job_id, "status": "pending", "current_epoch": 0, "zpe_history": [],
+            "total_epochs": params.total_epochs, "accuracy": 0.0, "loss": 0.0,
+            "zpe_effects": [0.0] * 6, "log_messages": [f"Init job: {params.model_name}"],
+            "parameters": params.model_dump(), "start_time": None, "end_time": None,
+            "gpu_info": get_gpu_usage_info_internal()
+        }
+        # If base_config_id is provided, log it and ensure it is used for weight loading in run_training_job
+        if hasattr(params, 'base_config_id') and params.base_config_id:
+            active_jobs[job_id]["log_messages"].append(f"base_config_id provided: {params.base_config_id}. Will attempt to load weights from this job if available.")
+        save_job_status(job_id)
+        background_tasks.add_task(run_training_job, job_id, params)
+        return {"status": "training_started", "job_id": job_id}
+    except Exception as e:
+        logger.error(f"Error in /api/train: {e}\n{traceback.format_exc()}")
+        return JSONResponse(status_code=500, content={"error": str(e), "traceback": traceback.format_exc()})
 
 @app.get("/api/status/{job_id}", summary="Get job status")
 async def get_job_status_endpoint(job_id: str):
@@ -709,7 +725,7 @@ async def stop_training_endpoint(job_id: str):
 async def list_jobs_endpoint(limit: int = 20):
     processed_job_ids, jobs_summary_list = set(), []
     for job_id, status_dict in list(active_jobs.items()):
-        model_name = status_dict.get("parameters", {}).get("modelName", "Unknown")
+        model_name = status_dict.get("parameters", {}).get("model_name", "Unknown")
         jobs_summary_list.append({
             "job_id": job_id, "model_name": model_name, "status": status_dict.get("status", "unknown"),
             "accuracy": status_dict.get("accuracy", 0.0), "current_epoch": status_dict.get("current_epoch", 0),
@@ -726,7 +742,7 @@ async def list_jobs_endpoint(limit: int = 20):
                 job_id_from_file = job_file_name.replace(".json", "")
                 job_data = load_job_status(job_id_from_file)
                 if job_data:
-                    model_name_file = job_data.get("parameters", {}).get("modelName", "Unknown")
+                    model_name_file = job_data.get("parameters", {}).get("model_name", "Unknown")
                     jobs_summary_list.append({
                         "job_id": job_id_from_file, "model_name": model_name_file,
                         "status": job_data.get("status", "unknown"), "accuracy": job_data.get("accuracy", 0.0),
@@ -837,6 +853,21 @@ async def chat_endpoint(chat_message: ChatMessage):
     return {"response": response_text}
 
 app.include_router(mixup_alpha_router)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    return JSONResponse(
+        status_code=500,
+        content={"error": str(exc), "traceback": traceback.format_exc()},
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"error": "Validation error", "details": exc.errors()},
+    )
 
 # Main Entry Point
 if __name__ == "__main__":

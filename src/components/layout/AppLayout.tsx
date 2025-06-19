@@ -228,7 +228,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Sidebar className="h-full sidebar bg-gradient-to-b from-zinc-950/90 to-zinc-900/80 backdrop-blur-lg shadow-2xl border-r-2 border-accent/40 px-4 py-6 space-y-2">
               <AppSidebarContent />
             </Sidebar>
-            <main className="flex flex-col h-full w-full bg-zinc-900/80 transition-all duration-300 p-4 md:p-8 overflow-y-auto">
+            <main className="flex flex-col h-full w-full bg-zinc-900/80 transition-all duration-300 overflow-y-auto">
               {children}
             </main>
           </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -11,74 +11,112 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { ScrollArea } from './ui/scroll-area';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
+import NeonAnalyzerChart from './visualizations/NeonAnalyzerChart';
 
 // Chart Panel Component
-export const ChartPanel: React.FC = () => {
+export const ChartPanel: React.FC<{
+  metrics?: { epoch: number; loss: number; accuracy: number; val_loss?: number; val_accuracy?: number }[];
+  jobStatus: any;
+  isLoading: boolean;
+  freeze: () => void;
+  resume: () => void;
+  exportMetrics: () => void;
+  advisorParams?: any; // HS-QNN suggested params
+  onStartAdvisorTraining?: (params: any) => void;
+}> = ({ metrics, jobStatus, isLoading, freeze, resume, exportMetrics, advisorParams, onStartAdvisorTraining }) => {
+  const safeMetrics = Array.isArray(metrics) ? metrics : [];
+  const hasData = safeMetrics.length > 0;
+  // Prepare traces for NeonAnalyzerChart
+  const accuracyTrace = { data: safeMetrics.map(m => m.accuracy), color: '#00ffe7', label: 'Accuracy' };
+  const lossTrace = { data: safeMetrics.map(m => m.loss), color: '#ff00ff', label: 'Loss' };
+
+  // Responsive chart sizing
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 600, height: 400 });
+  useEffect(() => {
+    const handleResize = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setSize({ width: rect.width, height: rect.height });
+      }
+    };
+    handleResize();
+    const ro = new window.ResizeObserver(handleResize);
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => { if (containerRef.current) ro.unobserve(containerRef.current); };
+  }, []);
+
   return (
-    <Card className="chart-panel h-full w-full bg-black/90 border-neon-blue/30 shadow-neon-blue/20">
-      <div className="chart-header p-4 border-b border-neon-blue/20">
+    <Card className="chart-panel h-full w-full bg-black/90 border-neon-blue/30 shadow-neon-blue/20 flex flex-col" style={{ fontFamily: 'Share Tech Mono, Space Mono, VT323, monospace' }}>
+      <div className="chart-header p-4 border-b border-neon-blue/20 relative">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-3 h-3 bg-neon-green rounded-full animate-pulse"></div>
             <h3 className="text-neon-green font-mono text-sm font-medium">SPECTRUM ANALYZER</h3>
-            <Badge variant="outline" className="border-neon-blue/50 text-neon-blue text-xs">
-              LIVE
-            </Badge>
+            <Badge variant="outline" className="border-neon-blue/50 text-neon-blue text-xs">LIVE</Badge>
           </div>
           <div className="flex items-center space-x-2">
             <div className="w-2 h-2 bg-neon-red rounded-full"></div>
             <span className="text-neon-blue font-mono text-xs">REC</span>
           </div>
+          {/* HS-QNN Start Training Button */}
+          {advisorParams && onStartAdvisorTraining && (
+            <button
+              className="instrument-btn ml-6 px-6 py-2 text-lg font-bold border-2 border-[#ffe066] text-[#ffe066] bg-[#18181b] shadow-[0_0_16px_#ffe066] hover:bg-[#ffe066] hover:text-[#18181b] transition-all rounded-full"
+              style={{ position: 'absolute', top: 16, right: 16, zIndex: 30 }}
+              onClick={() => onStartAdvisorTraining(advisorParams)}
+            >
+              Start Training with HS-QNN Suggested Parameters
+            </button>
+          )}
         </div>
       </div>
-      
-      <div className="chart-content p-4 h-full relative">
-        {/* Grid Overlay */}
+      <div ref={containerRef} className="flex-1 w-full h-full relative flex items-center justify-center p-0 m-0">
         <div className="absolute inset-0 grid-overlay opacity-20"></div>
-        
-        {/* Chart Placeholder */}
-        <div className="relative z-10 h-full flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-16 h-16 mx-auto mb-4 border-2 border-neon-blue/30 rounded-lg flex items-center justify-center">
-              <div className="w-8 h-8 border-t-2 border-neon-blue animate-spin rounded-full"></div>
-            </div>
-            <p className="text-neon-blue/70 font-mono text-sm">CHART DATA LOADING...</p>
-            <p className="text-neon-green/50 font-mono text-xs mt-1">QUANTUM SPECTRUM ANALYSIS</p>
+        {!isLoading && !hasData && (
+          <div className="absolute top-4 right-8 z-20 text-neon-blue/70 font-mono text-sm bg-black/70 px-3 py-1 rounded-lg border border-neon-blue/30 shadow">
+            No data yet.
           </div>
+        )}
+        <div className="relative z-10 w-full h-full flex items-center justify-center">
+          <NeonAnalyzerChart
+            traces={[accuracyTrace, lossTrace]}
+            width={size.width}
+            height={size.height}
+            showLegend={true}
+          />
         </div>
-        
-        {/* Chart Controls */}
-        <div className="absolute bottom-4 left-4 right-4">
-          <div className="flex items-center justify-between bg-black/50 p-2 rounded border border-neon-blue/20">
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2">
-                <Label className="text-neon-blue font-mono text-xs">SCALE</Label>
-                <Select defaultValue="auto">
-                  <SelectTrigger className="w-20 h-6 bg-black border-neon-blue/30 text-neon-blue text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-black border-neon-blue/30">
-                    <SelectItem value="auto">AUTO</SelectItem>
-                    <SelectItem value="manual">MANUAL</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Label className="text-neon-blue font-mono text-xs">RANGE</Label>
-                <Input 
-                  className="w-16 h-6 bg-black border-neon-blue/30 text-neon-blue text-xs text-center"
-                  defaultValue="0-100"
-                />
-              </div>
+      </div>
+      <div className="absolute bottom-4 left-4 right-4">
+        <div className="flex items-center justify-between bg-black/50 p-2 rounded border border-neon-blue/20">
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <Label className="text-neon-blue font-mono text-xs">SCALE</Label>
+              <Select defaultValue="auto">
+                <SelectTrigger className="w-20 h-6 bg-black border-neon-blue/30 text-neon-blue text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-black border-neon-blue/30">
+                  <SelectItem value="auto">AUTO</SelectItem>
+                  <SelectItem value="manual">MANUAL</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex items-center space-x-2">
-              <Button size="sm" variant="outline" className="h-6 px-2 border-neon-blue/30 text-neon-blue text-xs">
-                FREEZE
-              </Button>
-              <Button size="sm" variant="outline" className="h-6 px-2 border-neon-blue/30 text-neon-blue text-xs">
-                EXPORT
-              </Button>
+              <Label className="text-neon-blue font-mono text-xs">RANGE</Label>
+              <Input 
+                className="w-16 h-6 bg-black border-neon-blue/30 text-neon-blue text-xs text-center"
+                defaultValue="0-100"
+              />
             </div>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button size="sm" variant="outline" className="h-6 px-2 border-neon-blue/30 text-neon-blue text-xs" onClick={freeze}>
+              FREEZE
+            </Button>
+            <Button size="sm" variant="outline" className="h-6 px-2 border-neon-blue/30 text-neon-blue text-xs" onClick={exportMetrics}>
+              EXPORT
+            </Button>
           </div>
         </div>
       </div>
@@ -87,82 +125,51 @@ export const ChartPanel: React.FC = () => {
 };
 
 // Terminal Panel Component
-export const TerminalPanel: React.FC = () => {
-  const terminalLines = [
-    { id: 1, text: '> INITIALIZING QUANTUM NEURAL NETWORK...', type: 'info' },
-    { id: 2, text: '> LOADING TRAINING DATA: 100% COMPLETE', type: 'success' },
-    { id: 3, text: '> CONFIGURING HYPERPARAMETERS...', type: 'info' },
-    { id: 4, text: '> LEARNING RATE: 0.001 | BATCH SIZE: 32', type: 'data' },
-    { id: 5, text: '> EPOCH 1/100 | LOSS: 0.8472 | ACC: 0.7234', type: 'progress' },
-    { id: 6, text: '> EPOCH 2/100 | LOSS: 0.7234 | ACC: 0.7845', type: 'progress' },
-    { id: 7, text: '> EPOCH 3/100 | LOSS: 0.6543 | ACC: 0.8123', type: 'progress' },
-    { id: 8, text: '> EPOCH 4/100 | LOSS: 0.5987 | ACC: 0.8345', type: 'progress' },
-    { id: 9, text: '> EPOCH 5/100 | LOSS: 0.5432 | ACC: 0.8567', type: 'progress' },
-    { id: 10, text: '> VALIDATION LOSS: 0.5213 | VALIDATION ACC: 0.8634', type: 'validation' },
-    { id: 11, text: '> EPOCH 6/100 | LOSS: 0.4987 | ACC: 0.8734', type: 'progress' },
-    { id: 12, text: '> EPOCH 7/100 | LOSS: 0.4765 | ACC: 0.8845', type: 'progress' },
-    { id: 13, text: '> EPOCH 8/100 | LOSS: 0.4543 | ACC: 0.8934', type: 'progress' },
-    { id: 14, text: '> EPOCH 9/100 | LOSS: 0.4321 | ACC: 0.9012', type: 'progress' },
-    { id: 15, text: '> EPOCH 10/100 | LOSS: 0.4123 | ACC: 0.9087', type: 'progress' },
-    { id: 16, text: '> CHECKPOINT SAVED: epoch_10.pt', type: 'success' },
-    { id: 17, text: '> CONTINUING TRAINING...', type: 'info' },
-  ];
-
-  const getLineColor = (type: string) => {
-    switch (type) {
-      case 'info': return 'text-neon-blue';
-      case 'success': return 'text-neon-green';
-      case 'error': return 'text-neon-red';
-      case 'warning': return 'text-yellow-400';
-      case 'data': return 'text-cyan-400';
-      case 'progress': return 'text-neon-green';
-      case 'validation': return 'text-purple-400';
-      default: return 'text-neon-green';
-    }
-  };
-
+export const TerminalPanel: React.FC<{
+  logs: string[];
+  isPolling: boolean;
+  clearLogs: () => void;
+  exportLogs: () => void;
+  stopJob: () => void;
+}> = ({ logs, isPolling, clearLogs, exportLogs, stopJob }) => {
+  // Only show the last 17 lines
+  const visibleLogs = (logs ?? []).slice(-17);
   return (
-    <Card className="terminal-panel h-full w-full bg-black/95 border-neon-green/30 shadow-neon-green/20">
+    <Card className="terminal-panel h-full w-[96%] ml-auto mr-0 bg-black/95 border-neon-green/30 shadow-neon-green/20" style={{ fontFamily: 'Share Tech Mono, Space Mono, VT323, monospace', marginTop: '-8px', borderTopLeftRadius: 0, borderTopRightRadius: 0, borderBottomLeftRadius: '18px', borderBottomRightRadius: '18px', boxShadow: '0 0 24px #00ffae44' }}>
       <div className="terminal-header p-3 border-b border-neon-green/20">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-2 h-2 bg-neon-green rounded-full animate-pulse"></div>
             <h3 className="text-neon-green font-mono text-sm font-medium">TRAINING LOG</h3>
-            <Badge variant="outline" className="border-neon-green/50 text-neon-green text-xs">
-              ACTIVE
-            </Badge>
+            <Badge variant="outline" className="border-neon-green/50 text-neon-green text-xs">{isPolling ? 'ACTIVE' : 'FROZEN'}</Badge>
           </div>
           <div className="flex items-center space-x-2">
-            <span className="text-neon-green/70 font-mono text-xs">LINES: {terminalLines.length}</span>
-            <Button size="sm" variant="outline" className="h-5 px-2 border-neon-green/30 text-neon-green text-xs">
+            <span className="text-neon-green/70 font-mono text-xs">LINES: {(logs ?? []).length}</span>
+            <Button size="sm" variant="outline" className="h-5 px-2 border-neon-green/30 text-neon-green text-xs" onClick={clearLogs}>
               CLEAR
+            </Button>
+            <Button size="sm" variant="outline" className="h-5 px-2 border-neon-green/30 text-neon-green text-xs" onClick={exportLogs}>
+              EXPORT
+            </Button>
+            <Button size="sm" variant="outline" className="h-5 px-2 border-neon-red/30 text-neon-red text-xs" onClick={stopJob}>
+              STOP
             </Button>
           </div>
         </div>
       </div>
-      
       <ScrollArea className="terminal-content h-full">
         <div className="p-3 space-y-1">
-          {terminalLines.map((line) => (
-            <div key={line.id} className={`font-mono text-xs ${getLineColor(line.type)}`}>
-              {line.text}
-            </div>
-          ))}
+          {visibleLogs.length === 0 ? (
+            <div className="font-mono text-xs text-neon-blue/70">No logs yet.</div>
+          ) : (
+            visibleLogs.map((line, idx) => (
+              <div key={idx} className="font-mono text-xs text-neon-green whitespace-pre-wrap">
+                {line}
+              </div>
+            ))
+          )}
         </div>
       </ScrollArea>
-      
-      <div className="terminal-input p-3 border-t border-neon-green/20">
-        <div className="flex items-center space-x-2">
-          <span className="text-neon-green font-mono text-xs">></span>
-          <Input 
-            className="flex-1 h-6 bg-black border-neon-green/30 text-neon-green text-xs font-mono"
-            placeholder="Enter command..."
-          />
-          <Button size="sm" variant="outline" className="h-6 px-2 border-neon-green/30 text-neon-green text-xs">
-            SEND
-          </Button>
-        </div>
-      </div>
     </Card>
   );
 };

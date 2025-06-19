@@ -29,11 +29,11 @@ export interface BadgeProps
 
 const Badge = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
+  BadgeProps
+>(({ className, variant, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("neon-border text-[var(--neon-cyan)] px-2 py-1 text-xs font-mono uppercase tracking-wider", className)}
+    className={cn(badgeVariants({ variant }), className)}
     {...props}
   />
 ))

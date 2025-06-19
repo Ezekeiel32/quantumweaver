@@ -69,6 +69,7 @@ const initialNewConfigParameters: TrainingParameters = {
   quantumMode: true,
   modelName: "ZPE-New-Config",
   baseConfigId: null,
+  mixupAlpha: 0.2,
 };
 
 const TrainingParametersSchemaForAI = z.object({
@@ -378,7 +379,11 @@ export default function MyZpeAiModelsPage() {
       const listItem = item as ZpeAiModelListItem;
       modelName = `${listItem.parameters.modelName}_from_${listItem.type.replace('config', 'Config').replace('job', 'Job')}`;
       baseId = listItem.type === 'config' ? listItem.id : listItem.id;
-      paramsToLoad = { ...initialNewConfigParameters, ...listItem.parameters };
+      paramsToLoad = {
+        ...initialNewConfigParameters,
+        ...listItem.parameters,
+        mixupAlpha: (listItem.parameters as any).mixupAlpha ?? 0.2,
+      };
     } else {
       // item is a partial TrainingParameters object (likely from AI Advisor)
       const suggestedParams = item as Partial<TrainingParameters>;
@@ -387,7 +392,8 @@ export default function MyZpeAiModelsPage() {
       paramsToLoad = {
         ...initialNewConfigParameters,
  ...suggestedParams,
- couplingParams: suggestedParams.couplingParams || defaultZPEParamsArrays.couplingParams, // Ensure couplingParams defaults if not provided
+        couplingParams: suggestedParams.couplingParams || defaultZPEParamsArrays.couplingParams,
+        mixupAlpha: (suggestedParams as any).mixupAlpha ?? 0.2,
       };
     }
 
@@ -694,13 +700,8 @@ export default function MyZpeAiModelsPage() {
                             </TableCell>
                             <TableCell>
                               {item.type === "job" && item.status && (
-                                <Badge variant={
-                                  item.status === "running" ? "default" :
-                                  item.status === "completed" ? "default" :
-                                  item.status === "failed" || item.status === "stopped" ? "destructive" : "secondary"
-                                }
-                                className={cn(item.status === "completed" ? "bg-green-500 hover:bg-green-600 text-primary-foreground" : item.status === "running" ? "bg-blue-500 hover:bg-blue-600 text-primary-foreground animate-pulse" : "")}
-                                >{item.status}</Badge>
+                                <Badge variant={item.status === "running" ? "default" : item.status === "completed" ? "default" : "outline"}
+                                  className={cn(item.status === "failed" || item.status === "stopped" ? "bg-red-600 text-white" : "", item.status === "completed" ? "bg-green-500 hover:bg-green-600 text-primary-foreground" : item.status === "running" ? "bg-blue-500 hover:bg-blue-600 text-primary-foreground animate-pulse" : "")}>{item.status}</Badge>
                               )}
                               {item.type === "config" && `${item.accuracy.toFixed(2)}%`}
                               {item.type === "job" && item.status !== "running" && item.status !== "pending" && ` / ${item.accuracy.toFixed(2)}%`}
@@ -715,7 +716,7 @@ export default function MyZpeAiModelsPage() {
                               <Button variant="outline" size="sm" onClick={() => handleViewItemDetails(item)}><Eye className="mr-1 h-3 w-3"/>View</Button>
                               <Button variant="outline" size="sm" onClick={() => handleLoadInTrainer(item)}><Play className="mr-1 h-3 w-3"/>Train</Button>
                               <Button variant="outline" size="sm" onClick={() => handleCloneItem(item)}><Copy className="mr-1 h-3 w-3"/>Clone</Button>
-                              {item.type === "config" && <Button variant="destructive" size="sm" onClick={() => { setSelectedItem(item); setShowDeletePrompt(true);}}><Trash className="mr-1 h-3 w-3"/>Delete</Button>}
+                              {item.type === "config" && <Button variant="outline" size="sm" onClick={() => { setSelectedItem(item); setShowDeletePrompt(true);}}><Trash className="mr-1 h-3 w-3 text-red-500"/>Delete</Button>}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -782,7 +783,7 @@ export default function MyZpeAiModelsPage() {
             <DialogDescription>Are you sure you want to delete configuration "{selectedItem.name}"? This action cannot be undone.</DialogDescription></DialogHeader>
             <DialogFooter className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setShowDeletePrompt(false)}>Cancel</Button>
-              <Button variant="destructive" onClick={confirmDeleteItem}>Delete</Button>
+              <Button variant="outline" className="bg-red-600 text-white" onClick={confirmDeleteItem}>Delete</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
