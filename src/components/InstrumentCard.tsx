@@ -26,10 +26,15 @@ const InstrumentCard: React.FC<InstrumentCardProps> = ({
   advisorParams, onStartAdvisorTraining
 }) => {
   return (
-    <div className="instrument-card w-full h-full flex flex-col relative" style={{ fontFamily: 'Share Tech Mono, Space Mono, VT323, monospace', boxShadow: '0 0 32px 4px #00f0ff55' }}>
+    <div className="instrument-card w-full h-full flex flex-col relative" style={{ 
+      fontFamily: 'Share Tech Mono, Space Mono, VT323, monospace', 
+      background: '#0a0f1c',
+      boxShadow: '0 0 32px 4px #00f0ff55, 0 0 64px 8px #00aaff33',
+      border: '3px solid #00ffe7'
+    }}>
       {/* Grid Overlay */}
       <div className="absolute inset-0 pointer-events-none z-0">
-        <div className="instrument-grid-overlay w-full h-full" />
+        <div className="instrument-grid-overlay w-full h-full opacity-20" />
       </div>
       <div className="relative z-10 flex flex-col h-full w-full">
         <div className="flex-none h-[60%] min-h-[320px] max-h-[70vh] relative">

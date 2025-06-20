@@ -1,102 +1,189 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { toast } from '@/hooks/use-toast';
+import { useState, useEffect, useCallback } from 'react';
+import { toast } from './use-toast';
+import type { TrainingJob } from '@/types/training';
+import fs from 'fs';
+import path from 'path';
 
 export function useJobStatusPolling() {
   const [jobId, setJobId] = useState<string | null>(null);
-  const [jobStatus, setJobStatus] = useState<any>(null);
+  const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
-  const [metrics, setMetrics] = useState<{ epoch: number; loss: number; accuracy: number; val_loss?: number; val_accuracy?: number; }[]>([]);
+  const [metrics, setMetrics] = useState<any[]>([]);
   const [isPolling, setIsPolling] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Start a new training job
-  const startJob = useCallback(async (params: any) => {
-    setIsLoading(true);
+  // Find most recent active job
+  const findActiveJob = useCallback(async () => {
     try {
+      const res = await fetch('/api/active-job');
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.job_id) {
+        setJobId(data.job_id);
+        setIsPolling(true);
+      }
+    } catch (error) {
+      console.error('Failed to find active job:', error);
+    }
+  }, []);
+
+  // Start polling when component mounts
+  useEffect(() => {
+    findActiveJob();
+  }, [findActiveJob]);
+
+  const startJob = useCallback(async (params: any) => {
+    try {
+      setIsLoading(true);
       const res = await fetch('/api/train', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
       });
-      let data = null;
-      try {
-        data = await res.json();
-      } catch {
-        toast({ title: "Backend Error", description: "Failed to start training: backend did not return valid JSON.", variant: "destructive" });
-        setIsLoading(false);
-        return;
+
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
       }
-      if (!data || !data.job_id) {
-        toast({ title: "Backend Error", description: "No job_id returned from backend.", variant: "destructive" });
-        setIsLoading(false);
-        return;
+
+      const data = await res.json();
+      if (!data.job_id) {
+        throw new Error('No job ID returned');
       }
+
       setJobId(data.job_id);
       setIsPolling(true);
-    } catch (e) {
-      const err = e as Error;
-      toast({ title: "Network Error", description: err.message, variant: "destructive" });
+      toast({
+        title: "Training Started",
+        description: `Job ID: ${data.job_id}`,
+      });
+    } catch (error) {
+      console.error('Failed to start job:', error);
+      toast({
+        title: "Error Starting Training",
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  // Stop a running job
   const stopJob = useCallback(async () => {
     if (!jobId) return;
-    await fetch(`/api/stop/${jobId}`, { method: 'POST' });
+
+    try {
+      const res = await fetch(`/api/stop/${jobId}`, {
+        method: 'PUT',
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+
+      setIsPolling(false);
+      toast({
+        title: "Training Stopped",
+        description: `Job ${jobId} has been stopped`,
+      });
+    } catch (error) {
+      console.error('Failed to stop job:', error);
+      toast({
+        title: "Error Stopping Training",
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: "destructive",
+      });
+    }
   }, [jobId]);
 
-  // Poll job status
-  useEffect(() => {
+  const pollJobStatus = useCallback(async () => {
     if (!jobId || !isPolling) return;
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/status/${jobId}`);
-        if (!res.ok) return;
-        const status = await res.json();
-        setJobStatus(status);
-        setLogs(status.log_messages || []);
-        // Parse metrics from logs or status (customize as needed)
-        // Example: status.metrics = [{epoch, loss, accuracy, ...}]
-        if (status.metrics) setMetrics(status.metrics);
-      } catch {}
-    };
-    poll();
-    pollingRef.current = setInterval(poll, 1500);
-    return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
+
+    try {
+      const res = await fetch(`/api/status/${jobId}`);
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+
+      const data: TrainingJob = await res.json();
+      setJobStatus(data.status);
+      setLogs(data.log_messages || []);
+      
+      // Correctly read `metrics_history` and ensure it's an array
+      if (data.metrics_history && Array.isArray(data.metrics_history)) {
+        // Create a new array to guarantee a state update and trigger re-render
+        setMetrics([...data.metrics_history]);
+      }
+
+      if (data.status === 'completed' || data.status === 'failed' || data.status === 'stopped') {
+        setIsPolling(false);
+        if (data.status === 'completed' && data.metrics_history && data.metrics_history.length > 0) {
+          toast({
+            title: "Training Completed",
+            description: `Final accuracy: ${data.metrics_history[data.metrics_history.length - 1]?.val_acc.toFixed(2)}%`,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to poll job status:', error);
+      setIsPolling(false);
+    }
   }, [jobId, isPolling]);
 
-  // Freeze polling
-  const freeze = useCallback(() => setIsPolling(false), []);
-  // Resume polling
-  const resume = useCallback(() => setIsPolling(true), []);
-  // Clear logs (UI only)
-  const clearLogs = useCallback(() => setLogs([]), []);
-  // Export logs/metrics
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | undefined;
+
+    if (isPolling && jobId) {
+      pollJobStatus();
+      intervalId = setInterval(pollJobStatus, 1000); // Poll every second
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isPolling, jobId, pollJobStatus]);
+
+  const clearLogs = useCallback(() => {
+    setLogs([]);
+    setMetrics([]);
+  }, []);
+
   const exportLogs = useCallback(() => {
-    const blob = new Blob([logs.join('\n')], { type: 'text/plain' });
+    const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `job_${jobId}_logs.txt`;
+    a.download = `${jobId}_logs.json`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [logs, jobId]);
+  }, [jobId, logs]);
+
   const exportMetrics = useCallback(() => {
-    const csv = [
-      'epoch,loss,accuracy,val_loss,val_accuracy',
-      ...metrics.map(m => `${m.epoch},${m.loss},${m.accuracy},${m.val_loss ?? ''},${m.val_accuracy ?? ''}`)
-    ].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const blob = new Blob([JSON.stringify(metrics, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `job_${jobId}_metrics.csv`;
+    a.download = `${jobId}_metrics.json`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [metrics, jobId]);
+  }, [jobId, metrics]);
+
+  const freeze = useCallback(() => {
+    setIsPolling(false);
+  }, []);
+
+  const resume = useCallback(() => {
+    if (jobId) {
+      setIsPolling(true);
+    }
+  }, [jobId]);
 
   return {
     jobId,
@@ -107,11 +194,11 @@ export function useJobStatusPolling() {
     isLoading,
     startJob,
     stopJob,
-    freeze,
-    resume,
     clearLogs,
     exportLogs,
     exportMetrics,
-    setJobId,
+    freeze,
+    resume,
+    setJobId
   };
-} 
+}

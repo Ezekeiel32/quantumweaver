@@ -5,13 +5,16 @@ import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area"
 
 import { cn } from "@/lib/utils"
 
-const ScrollArea = React.forwardRef<
+export const ScrollArea = React.forwardRef<
   React.ElementRef<typeof ScrollAreaPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root>
 >(({ className, children, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("neon-border glass", className)}
+    className={cn(
+      "scroll-area scrollbar-thin scrollbar-thumb-neon-cyan-40 scrollbar-track-transparent hover:scrollbar-thumb-neon-cyan-80 transition-all duration-200",
+      className
+    )}
     {...props}
   >
       {children}
@@ -40,5 +43,3 @@ const ScrollBar = React.forwardRef<
   </ScrollAreaPrimitive.ScrollAreaScrollbar>
 ))
 ScrollBar.displayName = ScrollAreaPrimitive.ScrollAreaScrollbar.displayName
-
-export { ScrollArea, ScrollBar }

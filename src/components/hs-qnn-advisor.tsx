@@ -176,6 +176,7 @@ export function HSQNNAdvisor({ onApplyParameters, onSaveConfig, className }: HSQ
     setError(null);
     setAdvisorResult(null);
 
+    try {
     // Parse ZPE history with loss and accuracy
     const zpeHistory = parseLogMessagesToZpeHistory(selectedJobDetails.log_messages || []);
     // Load the full ZPE stats dataset
@@ -198,7 +199,7 @@ export function HSQNNAdvisor({ onApplyParameters, onSaveConfig, className }: HSQ
         }
         return `Epoch ${entry.epoch}: ZPE=[${entry.zpe_effects.map(z => z.toFixed(3)).join(', ')}], Loss=${loss.toFixed(4)}, Acc=${accuracy.toFixed(4)}`;
       })
-      .join('\n') + `\nFinal Accuracy: ${selectedJobDetails.accuracy.toFixed(4)}%`;
+        .join('\n') + `\nFinal Accuracy: ${selectedJobDetails.accuracy?.toFixed(4) ?? 'N/A'}%`;
 
     const inputForAI: any = {
       previousJobId: selectedJobDetails.job_id,
@@ -209,11 +210,10 @@ export function HSQNNAdvisor({ onApplyParameters, onSaveConfig, className }: HSQ
       zpeStatsDataset, // <-- pass the full dataset for advisor use
     };
 
-    try {
       const result = await adviseHSQNNParameters(inputForAI);
       setAdvisorResult(result);
     } catch (error: any) {
-      setError("Failed to get advice: " + error.message);
+      setError("Failed to get advice: " + (error?.message || error?.toString() || "Unknown error. Is the backend running?"));
     } finally {
       setIsLoading(false);
     }

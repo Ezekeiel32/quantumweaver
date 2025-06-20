@@ -16,111 +16,143 @@ import NeonAnalyzerChart from './visualizations/NeonAnalyzerChart';
 // Chart Panel Component
 export const ChartPanel: React.FC<{
   metrics?: { epoch: number; loss: number; accuracy: number; val_loss?: number; val_accuracy?: number }[];
-  jobStatus: any;
+  jobStatus?: string;
   isLoading: boolean;
   freeze: () => void;
   resume: () => void;
   exportMetrics: () => void;
-  advisorParams?: any; // HS-QNN suggested params
-  onStartAdvisorTraining?: (params: any) => void;
-}> = ({ metrics, jobStatus, isLoading, freeze, resume, exportMetrics, advisorParams, onStartAdvisorTraining }) => {
-  const safeMetrics = Array.isArray(metrics) ? metrics : [];
-  const hasData = safeMetrics.length > 0;
-  // Prepare traces for NeonAnalyzerChart
-  const accuracyTrace = { data: safeMetrics.map(m => m.accuracy), color: '#00ffe7', label: 'Accuracy' };
-  const lossTrace = { data: safeMetrics.map(m => m.loss), color: '#ff00ff', label: 'Loss' };
-
-  // Responsive chart sizing
+}> = ({ metrics = [], jobStatus = 'idle', isLoading, freeze, resume, exportMetrics }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ width: 600, height: 400 });
+  const [size, setSize] = useState({ width: 800, height: 600 });
+
   useEffect(() => {
     const handleResize = () => {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        setSize({ width: rect.width, height: rect.height });
+        setSize({ 
+          width: Math.max(rect.width, 800),
+          height: Math.max(rect.height - 80, 600)
+        });
       }
     };
+    
     handleResize();
-    const ro = new window.ResizeObserver(handleResize);
-    if (containerRef.current) ro.observe(containerRef.current);
-    return () => { if (containerRef.current) ro.unobserve(containerRef.current); };
+    
+    const resizeObserver = new ResizeObserver(handleResize);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', handleResize);
+    };
   }, []);
 
+  // Format metrics for the chart
+  const traces = [
+    {
+      data: metrics.map(m => m.accuracy),
+      color: '#39ff14', // Neon green
+      label: 'Accuracy'
+    },
+    {
+      data: metrics.map(m => m.loss),
+      color: '#ff00ff', // Neon pink
+      label: 'Loss'
+    },
+    {
+      data: metrics.map(m => m.val_accuracy || 0),
+      color: '#00ffe7', // Neon cyan
+      label: 'Val Acc'
+    }
+  ];
+
+  // Get latest metrics for header
+  const latestMetrics = metrics[metrics.length - 1];
+  const currentEpoch = latestMetrics?.epoch || 0;
+  const totalEpochs = 60; // This should come from your training config
+  const currentAccuracy = latestMetrics?.accuracy?.toFixed(2) || 0;
+  const currentLoss = latestMetrics?.loss?.toFixed(4) || 0;
+
+  // Status display text
+  const statusText = jobStatus?.toUpperCase() || 'IDLE';
+  const isRunning = jobStatus === 'running';
+
   return (
-    <Card className="chart-panel h-full w-full bg-black/90 border-neon-blue/30 shadow-neon-blue/20 flex flex-col" style={{ fontFamily: 'Share Tech Mono, Space Mono, VT323, monospace' }}>
-      <div className="chart-header p-4 border-b border-neon-blue/20 relative">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-3 h-3 bg-neon-green rounded-full animate-pulse"></div>
-            <h3 className="text-neon-green font-mono text-sm font-medium">SPECTRUM ANALYZER</h3>
-            <Badge variant="outline" className="border-neon-blue/50 text-neon-blue text-xs">LIVE</Badge>
-          </div>
-          <div className="flex items-center space-x-2">
-            <div className="w-2 h-2 bg-neon-red rounded-full"></div>
-            <span className="text-neon-blue font-mono text-xs">REC</span>
-          </div>
-          {/* HS-QNN Start Training Button */}
-          {advisorParams && onStartAdvisorTraining && (
-            <button
-              className="instrument-btn ml-6 px-6 py-2 text-lg font-bold border-2 border-[#ffe066] text-[#ffe066] bg-[#18181b] shadow-[0_0_16px_#ffe066] hover:bg-[#ffe066] hover:text-[#18181b] transition-all rounded-full"
-              style={{ position: 'absolute', top: 16, right: 16, zIndex: 30 }}
-              onClick={() => onStartAdvisorTraining(advisorParams)}
-            >
-              Start Training with HS-QNN Suggested Parameters
-            </button>
-          )}
+    <div className="flex flex-col h-full w-full min-h-[700px] bg-[#0a0f1c] rounded-lg border border-[#00ffe7]/30 shadow-lg shadow-[#00ffe7]/20">
+      {/* Header */}
+      <div className="flex items-center justify-between p-2 border-b border-[#00ffe7]/20">
+        <div className="flex items-center space-x-4">
+          <h2 className="text-xl font-bold text-[#00ffe7] font-mono">SPECTRUM ANALYZER</h2>
+          <Badge variant="outline" className={`${isRunning ? 'animate-pulse' : ''} bg-[#00ffe7]/10 text-[#00ffe7] border-[#00ffe7]/30`}>
+            {isRunning ? 'LIVE' : 'FROZEN'}
+          </Badge>
+        </div>
+        <div className="flex items-center space-x-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={isRunning ? freeze : resume}
+            className="border-[#00ffe7] text-[#00ffe7] hover:bg-[#00ffe7]/10"
+          >
+            {isRunning ? 'FREEZE' : 'RESUME'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportMetrics}
+            className="border-[#00ffe7] text-[#00ffe7] hover:bg-[#00ffe7]/10"
+          >
+            EXPORT
+          </Button>
         </div>
       </div>
-      <div ref={containerRef} className="flex-1 w-full h-full relative flex items-center justify-center p-0 m-0">
-        <div className="absolute inset-0 grid-overlay opacity-20"></div>
-        {!isLoading && !hasData && (
-          <div className="absolute top-4 right-8 z-20 text-neon-blue/70 font-mono text-sm bg-black/70 px-3 py-1 rounded-lg border border-neon-blue/30 shadow">
-            No data yet.
+
+      {/* Status Bar */}
+      <div className="flex items-center justify-between px-4 py-1 bg-[#0a0f1c]/80 border-b border-[#00ffe7]/20">
+        <div className="flex items-center space-x-4">
+          <span className="text-[#00ffe7] font-mono">
+            Epoch: {currentEpoch}/{totalEpochs}
+          </span>
+          <span className="text-[#39ff14] font-mono">
+            Accuracy: {currentAccuracy}%
+          </span>
+          <span className="text-[#ff00ff] font-mono">
+            Loss: {currentLoss}
+          </span>
+        </div>
+        <div className="flex items-center space-x-2">
+          <div className={`w-2 h-2 rounded-full ${isRunning ? 'bg-[#39ff14] animate-pulse' : 'bg-[#ff0000]'}`} />
+          <span className="text-[#00ffe7] font-mono text-sm">
+            {statusText}
+          </span>
+        </div>
+      </div>
+
+      {/* Chart */}
+      <div className="flex-1 p-2 min-h-[600px]" ref={containerRef}>
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-[#00ffe7] font-mono animate-pulse">Initializing Quantum Interface...</div>
           </div>
-        )}
-        <div className="relative z-10 w-full h-full flex items-center justify-center">
+        ) : metrics.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-[#00ffe7] font-mono">No training data yet</div>
+          </div>
+        ) : (
           <NeonAnalyzerChart
-            traces={[accuracyTrace, lossTrace]}
+            traces={traces}
             width={size.width}
             height={size.height}
-            showLegend={true}
+            overlays={[
+              { text: 'Training Metrics', color: '#39ff14', x: 120, y: 40, fontSize: 24 }
+            ]}
+            showLegend
           />
-        </div>
+        )}
       </div>
-      <div className="absolute bottom-4 left-4 right-4">
-        <div className="flex items-center justify-between bg-black/50 p-2 rounded border border-neon-blue/20">
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <Label className="text-neon-blue font-mono text-xs">SCALE</Label>
-              <Select defaultValue="auto">
-                <SelectTrigger className="w-20 h-6 bg-black border-neon-blue/30 text-neon-blue text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-black border-neon-blue/30">
-                  <SelectItem value="auto">AUTO</SelectItem>
-                  <SelectItem value="manual">MANUAL</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Label className="text-neon-blue font-mono text-xs">RANGE</Label>
-              <Input 
-                className="w-16 h-6 bg-black border-neon-blue/30 text-neon-blue text-xs text-center"
-                defaultValue="0-100"
-              />
-            </div>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button size="sm" variant="outline" className="h-6 px-2 border-neon-blue/30 text-neon-blue text-xs" onClick={freeze}>
-              FREEZE
-            </Button>
-            <Button size="sm" variant="outline" className="h-6 px-2 border-neon-blue/30 text-neon-blue text-xs" onClick={exportMetrics}>
-              EXPORT
-            </Button>
-          </div>
-        </div>
-      </div>
-    </Card>
+    </div>
   );
 };
 

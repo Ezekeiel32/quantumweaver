@@ -201,43 +201,32 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, []);
   
-  const toggleDarkModeGlobal = () => {
-     setIsDarkMode(prev => {
-        const newMode = !prev;
-        if (newMode) {
+  useEffect(() => {
+    if (isDarkMode) {
             document.documentElement.classList.add("dark");
             localStorage.setItem("theme", "dark");
         } else {
             document.documentElement.classList.remove("dark");
             localStorage.setItem("theme", "light");
         }
-        return newMode;
-     });
-  };
+  }, [isDarkMode]);
 
   return (
     <SidebarProvider>
       <AdvisorProvider>
-        <div className="relative h-screen w-screen overflow-hidden">
-          {/* Animated holographic background */}
-          <div className="animated-holo-bg" aria-hidden="true" />
-          <div
-            className="grid h-full w-full"
-            style={{ gridTemplateColumns: '22rem 1fr' }}
-          >
-            <Sidebar className="h-full sidebar bg-gradient-to-b from-zinc-950/90 to-zinc-900/80 backdrop-blur-lg shadow-2xl border-r-2 border-accent/40 px-4 py-6 space-y-2">
+        <div className="flex min-h-screen w-full">
+          <Sidebar className="z-40">
               <AppSidebarContent />
             </Sidebar>
-            <main className="flex flex-col h-full w-full bg-zinc-900/80 transition-all duration-300 overflow-y-auto">
+          <main className="flex-1 min-h-screen bg-black/95 relative">
               {children}
-            </main>
-          </div>
-          {/* Floating Mini Advisor always present */}
+            {/* FloatingMiniAdvisor overlays all pages */}
           <FloatingMiniAdvisor
             onApplyParameters={() => {}}
             onSaveConfig={() => {}}
-            defaultMinimized={true}
+              defaultMinimized={false}
           />
+          </main>
         </div>
       </AdvisorProvider>
     </SidebarProvider>

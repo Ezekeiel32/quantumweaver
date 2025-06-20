@@ -9,6 +9,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ChartPanel, TerminalPanel, ControlsPanel } from '@/components/DashboardPanels';
 
 const appFeatures = [
   { href: "/train", label: "Train Model", icon: PlayCircle, description: "Configure and initiate ZPE model training jobs." },
@@ -43,9 +44,21 @@ interface Job {
   };
 }
 
+// Dummy data for demonstration; replace with real API calls as needed
+const demoMetrics = Array.from({ length: 40 }, (_, i) => ({
+  epoch: i + 1,
+  loss: Math.max(0, 1.2 - i * 0.02 + Math.random() * 0.05),
+  accuracy: Math.min(1, 0.5 + i * 0.012 + Math.random() * 0.03),
+  val_loss: Math.max(0, 1.1 - i * 0.018 + Math.random() * 0.07),
+  val_accuracy: Math.min(1, 0.48 + i * 0.013 + Math.random() * 0.04),
+}));
+const demoLogs = Array.from({ length: 30 }, (_, i) => `Epoch ${i + 1}: Training... Loss: ${(1.2 - i * 0.02).toFixed(4)}, Acc: ${(0.5 + i * 0.012).toFixed(4)}`);
+
 export default function DashboardPage() {
   const [latestJob, setLatestJob] = useState<Job | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [metrics, setMetrics] = useState(demoMetrics);
+  const [logs, setLogs] = useState(demoLogs);
 
   const fetchLatestJob = useCallback(async () => {
     setIsLoading(true);
@@ -89,96 +102,64 @@ export default function DashboardPage() {
     keyFeature: "-"
   };
 
+  // Dummy handlers for panel actions
+  const freeze = () => {};
+  const resume = () => {};
+  const exportMetrics = () => {};
+  const clearLogs = () => setLogs([]);
+  const exportLogs = () => {};
+  const stopJob = () => {};
+
   return (
-    <div className="p-1 md:p-2 space-y-6">
-      <div className="matrix-panel">
-      <Card className="shadow-lg border-primary/20 bg-card/80 backdrop-blur-sm">
+    <div className="w-full min-h-screen p-4 md:p-8 flex flex-col items-center bg-black/95 relative">
+      {/* Neon grid overlay */}
+      <div className="absolute inset-0 pointer-events-none z-0">
+        <div className="instrument-grid-overlay w-full h-full" />
+      </div>
+      {/* Welcome/overview section */}
+      <div className="w-full max-w-6xl mb-8 z-10">
+        <Card className="bg-black/80 border-neon-blue/30 shadow-neon-blue/20 mb-4">
         <CardHeader>
           <div className="flex items-center gap-3 mb-2">
-            <Zap className="h-10 w-10 text-primary animate-pulse" />
+              <Zap className="h-10 w-10 text-neon-cyan animate-pulse" />
             <div>
-              <CardTitle className="text-3xl font-headline tracking-tight text-primary">
-                Quantum Weaver Control Panel
+                <CardTitle className="text-3xl font-headline tracking-tight text-neon-cyan">
+                  Quantum Weaver Instrument Dashboard
               </CardTitle>
-              <CardDescription className="text-lg text-muted-foreground">
-                Harness Zero-Point Energy for advanced AI model development.
+                <CardDescription className="text-lg text-neon-blue/80">
+                  Live AI Model Training & Analysis
               </CardDescription>
             </div>
           </div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="bg-muted/50 p-6 rounded-lg border border-border/50">
-            <h3 className="text-xl font-semibold mb-3 flex items-center gap-2 text-accent-foreground"><Atom className="h-6 w-6 text-accent"/>Welcome to the TetraZPE Platform!</h3>
-            <p className="text-sm text-foreground/80 leading-relaxed">
-              Navigate through specialized tools to configure, train, analyze, and visualize your ZPE-enhanced neural networks.
-              Utilize AI-powered assistants and explore quantum-inspired simulations.
-            </p>
-          </div>
-
-          <Card className="bg-gradient-to-br from-card to-primary/5 border-primary/20">
-            <CardHeader>
-                <CardTitle className="text-xl font-headline flex items-center gap-2"><TrendingUp className="h-5 w-5 text-accent"/>Latest Model Overview</CardTitle>
-                <CardDescription>Key statistics from the most recent real job run.</CardDescription>
-            </CardHeader>
-            <CardContent className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-              <div className="bg-background/70 p-3 rounded-md flex justify-between items-center ring-1 ring-inset ring-border">
-                <span className="text-muted-foreground">Model Name:</span>
-                <Badge variant="secondary" className="font-code">{latestModelData.name}</Badge>
-              </div>
-              <div className="bg-background/70 p-3 rounded-md flex justify-between items-center ring-1 ring-inset ring-border">
-                  <span className="text-muted-foreground">Accuracy:</span>
-                <Badge className="bg-green-500/20 text-green-400 border-green-600/50 font-semibold">{latestModelData.accuracy}%</Badge>
-              </div>
-              <div className="bg-background/70 p-3 rounded-md flex justify-between items-center ring-1 ring-inset ring-border">
-                <span className="text-muted-foreground">Avg. ZPE Effect:</span>
-                <span className="font-semibold font-code">{latestModelData.avgZPEEffect.toFixed(3)}</span>
-              </div>
-              <div className="bg-background/70 p-3 rounded-md flex justify-between items-center ring-1 ring-inset ring-border">
-                <span className="text-muted-foreground">Quantum Mode:</span>
-                {latestModelData.quantumMode ? (
-                  <Badge className="bg-purple-500/20 text-purple-400 border-purple-600/50">Enabled</Badge>
-                ) : (
-                  <Badge variant="outline">Disabled</Badge>
-                )}
-              </div>
-              <div className="bg-background/70 p-3 rounded-md md:col-span-2 lg:col-span-2 ring-1 ring-inset ring-border">
-                <span className="text-muted-foreground">Key Feature: </span>
-                <span className="font-medium">{latestModelData.keyFeature}</span>
-              </div>
-            </CardContent>
-          </Card>
-        </CardContent>
       </Card>
       </div>
-
-      <div>
-        <h2 className="text-2xl font-headline mb-6 tracking-tight flex items-center gap-2">
-          <Wrench className="h-6 w-6 text-primary"/>Application Tools & Features
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {appFeatures.map((feature) => (
-            <Card key={feature.href} className="flex flex-col bg-card/90 hover:shadow-xl hover:border-primary/50 transition-all duration-200 ease-in-out transform hover:-translate-y-1 backdrop-blur-sm">
-              <CardHeader className="flex-row items-start gap-4 space-y-0 pb-3">
-                <div className="p-3 bg-primary/10 rounded-lg">
-                  <feature.icon className="h-7 w-7 text-primary" />
+      {/* Instrument grid layout */}
+      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-5 gap-6 z-10">
+        {/* ChartPanel (spans 3 columns on large screens) */}
+        <div className="col-span-1 lg:col-span-3 row-span-2">
+          <ChartPanel
+            metrics={metrics}
+            jobStatus={latestJob ? { status: latestJob.status } : { status: "completed" }}
+            isLoading={isLoading}
+            freeze={freeze}
+            resume={resume}
+            exportMetrics={exportMetrics}
+          />
                 </div>
-                <div className="flex-1">
-                  <CardTitle className="text-lg font-headline mb-1">{feature.label}</CardTitle>
+        {/* ControlsPanel (right side, tall) */}
+        <div className="col-span-1 lg:col-span-2 row-span-2">
+          <ControlsPanel />
                 </div>
-              </CardHeader>
-              <CardContent className="flex-1 mb-2">
-                <p className="text-sm text-muted-foreground">{feature.description}</p>
-              </CardContent>
-              <CardFooter>
-                <Button asChild variant="outline" className="w-full border-primary/30 hover:bg-primary/10 hover:text-primary group">
-                  <Link href={feature.href}>
-                    Open Tool
-                    <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform"/>
-                  </Link>
-                </Button>
-              </CardFooter>
-            </Card>
-          ))}
+        {/* TerminalPanel (full width, below chart) */}
+        <div className="col-span-1 lg:col-span-5">
+          <TerminalPanel
+            logs={logs}
+            isPolling={false}
+            clearLogs={clearLogs}
+            exportLogs={exportLogs}
+            stopJob={stopJob}
+          />
         </div>
       </div>
     </div>

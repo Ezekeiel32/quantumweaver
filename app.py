@@ -130,25 +130,18 @@ app.add_middleware(
 
 # Pydantic Models
 class TrainingParameters(BaseModel):
-    total_epochs: int
-    batch_size: int
-    learning_rate: float
-    weight_decay: float
-    momentum_params: List[float]
-    strength_params: List[float]
-    noise_params: List[float]
-    coupling_params: Optional[List[float]] = None
-    quantum_circuit_size: int
-    label_smoothing: float
-    quantum_mode: bool
     model_name: str
+    total_epochs: int = 30
+    batch_size: int = 32
+    learning_rate: float = 0.001
+    sequence_length: Optional[int] = 10
+    label_smoothing: Optional[float] = 0.1
+    mixup_alpha: Optional[float] = 1.0
+    zpe_regularization_strength: Optional[float] = 0.001
     base_config_id: Optional[str] = None
-    mixup_alpha: Optional[float] = 0.2
-    channel_sizes: Optional[List[int]] = None
+    
     class Config:
         extra = "allow"
-        allow_population_by_field_name = True
-        alias_generator = lambda s: s.lower() if s.islower() else ''.join(['_' + c.lower() if c.isupper() else c for c in s]).lstrip('_')
 
 class ModelConfig(BaseModel):
     id: Optional[str] = None
@@ -170,16 +163,16 @@ class DatasetPrepRequest(BaseModel):
     feature_columns: List[str] = ["content", "description"]
     output_file: str = "processed_dataset.csv"
 
-# ZPEDeepNet Model
+# --- NEW ZPEDeepNet Model Definition from user ---
 class ZPEDeepNet(nn.Module):
-    def __init__(self, input_channels=1, output_size=10, sequence_length=10):
+    def __init__(self, output_size=10, sequence_length=10):
         super(ZPEDeepNet, self).__init__()
         self.sequence_length = sequence_length
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.zpe_flows = [torch.ones(sequence_length, device=self.device) for _ in range(6)]
-        self.cycle_length = 2 ** 5
+
         self.conv1 = nn.Sequential(
-            nn.Conv2d(input_channels, 64, kernel_size=3, padding=1),
+            nn.Conv2d(1, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.MaxPool2d(2)
@@ -202,10 +195,9 @@ class ZPEDeepNet(nn.Module):
             nn.ReLU(),
             nn.MaxPool2d(2)
         )
-        fc_input_features = 512 * 1 * 1
         self.fc = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(fc_input_features, 2048),
+            nn.Linear(512, 2048),
             nn.ReLU(),
             nn.Dropout(0.5),
             nn.Linear(2048, 512),
@@ -213,70 +205,48 @@ class ZPEDeepNet(nn.Module):
             nn.Dropout(0.5),
             nn.Linear(512, output_size)
         )
-        self.shortcut1 = nn.Sequential(nn.Conv2d(input_channels, 64, kernel_size=1, stride=1, padding=0), nn.MaxPool2d(2))
-        self.shortcut2 = nn.Sequential(nn.Conv2d(64, 128, kernel_size=1, stride=1, padding=0), nn.MaxPool2d(2))
-        self.shortcut3 = nn.Sequential(nn.Conv2d(128, 256, kernel_size=1, stride=1, padding=0), nn.MaxPool2d(2))
-        self.shortcut4 = nn.Sequential(nn.Conv2d(256, 512, kernel_size=1, stride=1, padding=0), nn.MaxPool2d(2))
+        self.shortcut1 = nn.Sequential(
+            nn.Conv2d(1, 64, kernel_size=1, stride=1, padding=0),
+            nn.MaxPool2d(2)
+        )
+        self.shortcut2 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=1, stride=1, padding=0),
+            nn.MaxPool2d(2)
+        )
+        self.shortcut3 = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=1, stride=1, padding=0),
+            nn.MaxPool2d(2)
+        )
+        self.shortcut4 = nn.Sequential(
+            nn.Conv2d(256, 512, kernel_size=1, stride=1, padding=0),
+            nn.MaxPool2d(2)
+        )
 
     def perturb_zpe_flow(self, data, zpe_idx, feature_size):
-        if data.numel() == 0:
-            return
-        batch_mean = torch.mean(data.detach(), dim=0).reshape(-1)
-        if batch_mean.numel() == 0 or self.sequence_length == 0:
-            return
+        batch_mean = torch.mean(data.detach(), dim=0).view(-1)
+        if self.sequence_length == 0: return # Avoid division by zero
         divisible_size = (batch_mean.size(0) // self.sequence_length) * self.sequence_length
-        if divisible_size == 0:
-            if batch_mean.size(0) > 0:
-                padding_size = self.sequence_length - batch_mean.size(0)
-                if padding_size < 0:
-                    padding_size = 0
-                batch_mean_padded = torch.cat((batch_mean, torch.zeros(padding_size, device=self.device)))
-                reshaped = batch_mean_padded.reshape(-1, self.sequence_length)
-            else:
-                return
-        else:
-            batch_mean_truncated = batch_mean[:divisible_size]
-            reshaped = batch_mean_truncated.reshape(-1, self.sequence_length)
-        if reshaped.numel() == 0:
-            return
+        if divisible_size == 0: return # Not enough data
+        batch_mean_truncated = batch_mean[:divisible_size]
+        reshaped = batch_mean_truncated.view(-1, self.sequence_length)
         perturbation = torch.mean(reshaped, dim=0)
         perturbation = torch.tanh(perturbation * 0.3)
         momentum = 0.9 if zpe_idx < 4 else 0.7
         with torch.no_grad():
-            self.zpe_flows[zpe_idx].data = momentum * self.zpe_flows[zpe_idx].data + (1 - momentum) * (1.0 + perturbation)
-            self.zpe_flows[zpe_idx].data = torch.clamp(self.zpe_flows[zpe_idx].data, 0.8, 1.2)
+            self.zpe_flows[zpe_idx] = momentum * self.zpe_flows[zpe_idx] + (1 - momentum) * (1.0 + perturbation)
+            self.zpe_flows[zpe_idx] = torch.clamp(self.zpe_flows[zpe_idx], 0.8, 1.2)
 
     def apply_zpe(self, x, zpe_idx, spatial=True):
-        if x.numel() == 0:
-            return x
-        feature_size = x.size(1) if spatial else x.size(-1)
-        if feature_size == 0 and x.numel() > 0:
-            if not spatial and x.dim() == 2:
-                feature_size = x.size(1)
-            else:
-                return x
-        elif feature_size == 0 and x.numel() == 0:
-            return x
-        if self.sequence_length == 0:
-            return x
-        self.perturb_zpe_flow(x, zpe_idx, feature_size)
+        if self.sequence_length == 0: return x # Avoid division by zero
+        self.perturb_zpe_flow(x, zpe_idx, x.size(1) if spatial else x.size(-1))
         flow = self.zpe_flows[zpe_idx]
         if spatial:
-            if x.size(2) == 0 or x.size(3) == 0:
-                return x
-            num_elements_to_cover = x.size(2) * x.size(3)
-            repeats = (num_elements_to_cover + self.sequence_length - 1) // self.sequence_length
-            flow_expanded_flat = flow.repeat(repeats)[:num_elements_to_cover]
-            flow_expanded = flow_expanded_flat.reshape(1, 1, x.size(2), x.size(3))
-            if x.size(1) > 0:
-                flow_expanded = flow_expanded.expand(x.size(0), x.size(1), x.size(2), x.size(3))
+            size = x.size(2) * x.size(3)
+            flow_expanded = flow.repeat(size // self.sequence_length + 1)[:size].view(1, 1, x.size(2), x.size(3))
+            flow_expanded = flow_expanded.expand(x.size(0), x.size(1), x.size(2), x.size(3))
         else:
-            if x.size(-1) == 0:
-                return x
-            num_elements_to_cover = x.size(-1)
-            repeats = (num_elements_to_cover + self.sequence_length - 1) // self.sequence_length
-            flow_expanded_flat = flow.repeat(repeats)[:num_elements_to_cover]
-            flow_expanded = flow_expanded_flat.reshape(1, -1).expand_as(x)
+            flow_expanded = flow.repeat(x.size(-1) // self.sequence_length + 1)[:x.size(-1)].view(1, -1)
+            flow_expanded = flow_expanded.expand(x.size(0), x.size(-1))
         return x * flow_expanded
 
     def forward(self, x):
@@ -300,12 +270,16 @@ class ZPEDeepNet(nn.Module):
     def analyze_zpe_effect(self):
         return [torch.mean(torch.abs(flow - 1.0)).item() for flow in self.zpe_flows]
 
+# --- END NEW ZPEDeepNet Model ---
+
 # Utility Functions
-def mixup(data: torch.Tensor, targets: torch.Tensor, alpha: float = 1.0, device: str = 'cpu'):
-    indices = torch.randperm(data.size(0)).to(device)
-    shuffled_data, shuffled_targets = data[indices], targets[indices]
+def mixup(data: torch.Tensor, targets: torch.Tensor, alpha: float = 1.0):
+    indices = torch.randperm(data.size(0))
+    shuffled_data = data[indices]
+    shuffled_targets = targets[indices]
     lam = np.random.beta(alpha, alpha)
-    return lam * data + (1 - lam) * shuffled_data, targets, shuffled_targets, lam
+    data = lam * data + (1 - lam) * shuffled_data
+    return data, targets, shuffled_targets, lam
 
 def get_gpu_usage_info_internal() -> Dict[str, Any]:
     if not PYNVML_AVAILABLE or not pynvml:
@@ -462,176 +436,140 @@ def preprocess_dataset(request: DatasetPrepRequest) -> Dict[str, Any]:
         logger.error(f"Error processing dataset: {e}")
         return {"error": str(e)}
 
-# Training Job
+# --- NEW Training Job Logic from user ---
 def run_training_job(job_id: str, params: TrainingParameters):
-    global active_jobs
-    if job_id not in active_jobs:
-        loaded_status = load_job_status(job_id)
-        if loaded_status:
-            active_jobs[job_id] = loaded_status
-        else:
-            active_jobs[job_id] = {
-                "job_id": job_id, "status": "failed", "log_messages": [f"Job ID {job_id} not found."],
-                "parameters": params.model_dump(), "total_epochs": params.total_epochs,
-                "current_epoch": 0, "accuracy": 0.0, "loss": 0.0, "zpe_effects": [],
-                "zpe_history": [], "start_time": datetime.now().isoformat(),
-                "end_time": datetime.now().isoformat(), "gpu_info": get_gpu_usage_info_internal()
-            }
-            save_job_status(job_id)
-            return
-
-    job_status = active_jobs[job_id]
-    job_status["status"] = "running"
-    job_status["log_messages"].append(f"Starting PyTorch training: {params.model_name}")
-    job_status["start_time"] = datetime.now().isoformat()
-    job_status["gpu_info"] = get_gpu_usage_info_internal()
-    save_job_status(job_id)
-
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    active_jobs[job_id]["status"] = "running"
+    active_jobs[job_id]["start_time"] = time.time()
+    active_jobs[job_id]["log_messages"].append("--- [QuantumWeaver-V3 Engine] Training job initiated ---")
+    
     try:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        job_status["log_messages"].append(f"Device: {device}")
-        job_status["log_messages"].append("Setting up MNIST dataset...")
-        train_transform = transforms.Compose([
-            transforms.RandomRotation(15), transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
-            transforms.RandomCrop(28, padding=2), transforms.ToTensor(),
-            transforms.Normalize((0.5,), (0.5,)), transforms.RandomErasing(p=0.3, scale=(0.02, 0.1))
-        ])
-        val_transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
-        train_dataset_full = datasets.MNIST(root='./data_api', train=True, download=True, transform=train_transform)
-        val_dataset = datasets.MNIST(root='./data_api', train=False, download=True, transform=val_transform)
-        train_loader = DataLoader(train_dataset_full, batch_size=params.batch_size, shuffle=True, num_workers=2, pin_memory=(device.type == 'cuda'))
-        val_loader = DataLoader(val_dataset, batch_size=params.batch_size, shuffle=False, num_workers=2, pin_memory=(device.type == 'cuda'))
-        job_status["log_messages"].append(f"DataLoaders created. Train: {len(train_loader)}, Val: {len(val_loader)} batches.")
-        model = ZPEDeepNet(input_channels=1, output_size=10, sequence_length=10).to(device)
-        criterion = nn.CrossEntropyLoss(label_smoothing=params.label_smoothing)
-        optimizer = optim.Adam(model.parameters(), lr=params.learning_rate, weight_decay=params.weight_decay)
-        scheduler = CosineAnnealingLR(optimizer, T_max=params.total_epochs)
-        job_status["log_messages"].append("Model & Optimizer initialized.")
-        job_status["gpu_info"] = get_gpu_usage_info_internal()
+        # Data Setup
+        active_jobs[job_id]["log_messages"].append("Setting up data transforms...")
         save_job_status(job_id)
+        train_transform = transforms.Compose([
+            transforms.RandomRotation(20),
+            transforms.RandomAffine(degrees=0, translate=(0.2, 0.2)),
+            transforms.RandomCrop(28, padding=4),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,)),
+            transforms.RandomErasing(p=0.5, scale=(0.02, 0.2))
+        ])
+        test_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
 
-        # === CONTINUE TRAINING LOGIC ===
-        if hasattr(params, 'base_config_id') and params.base_config_id:
-            prev_model_path = os.path.join(JOBS_DIR, f"{params.base_config_id}_model.pth")
-            if os.path.exists(prev_model_path):
-                try:
-                    model.load_state_dict(torch.load(prev_model_path, map_location=device))
-                    job_status["log_messages"].append(f"Loaded previous weights from {prev_model_path} for continue training.")
-                except Exception as e:
-                    job_status["log_messages"].append(f"Failed to load previous weights from {prev_model_path}: {e}. Starting fresh.")
-                    # List available .pth files for debugging
-                    available = [f for f in os.listdir(JOBS_DIR) if f.endswith('_model.pth')]
-                    job_status["log_messages"].append(f"Available model files: {available}")
-            else:
-                job_status["log_messages"].append(f"No previous weights found for base_config_id {params.base_config_id}, starting fresh.")
+        active_jobs[job_id]["log_messages"].append("Loading MNIST dataset...")
+        save_job_status(job_id)
+        # Use DATASET_DIR constant
+        train_dataset = datasets.MNIST(root=DATASET_DIR, train=True, download=True, transform=train_transform)
+        test_dataset = datasets.MNIST(root=DATASET_DIR, train=False, download=True, transform=test_transform)
 
-        for epoch in range(1, params.total_epochs + 1):
-            if job_status["status"] == "stopped":
-                job_status["log_messages"].append("Training stopped.")
+        train_size = int(0.9 * len(train_dataset))
+        val_size = len(train_dataset) - train_size
+        train_subset, val_subset = torch.utils.data.random_split(train_dataset, [train_size, val_size])
+        
+        train_loader = DataLoader(train_subset, batch_size=params.batch_size, shuffle=True, num_workers=2)
+        val_loader = DataLoader(val_subset, batch_size=params.batch_size, shuffle=False, num_workers=2)
+        
+        # Model Setup
+        active_jobs[job_id]["log_messages"].append("Initializing ZPEDeepNet model...")
+        save_job_status(job_id)
+        model = ZPEDeepNet(output_size=10, sequence_length=getattr(params, 'sequence_length', 10)).to(device)
+        criterion = nn.CrossEntropyLoss(label_smoothing=getattr(params, 'label_smoothing', 0.1))
+        optimizer = optim.Adam(model.parameters(), lr=params.learning_rate)
+        scheduler = CosineAnnealingLR(optimizer, T_max=params.total_epochs)
+
+        # Training Loop
+        for epoch in range(params.total_epochs):
+            if active_jobs[job_id]["status"] == "stopped":
+                active_jobs[job_id]["log_messages"].append("Training was stopped by user.")
                 break
-
-            epoch_start_time = time.time()
+                
+            active_jobs[job_id]["current_epoch"] = epoch + 1
             model.train()
-            epoch_loss_sum, num_batches_epoch = 0.0, 0
-            job_status["log_messages"].append(f"--- Epoch {epoch}/{params.total_epochs} ---")
-            job_status["gpu_info"] = get_gpu_usage_info_internal()
-            save_job_status(job_id)
-
-            for batch_idx, (data, target) in enumerate(train_loader):
-                if job_status["status"] == "stopped":
-                    break
-                data, target = data.to(device), target.to(device)
-                data_mixed, target_a, target_b, lam = mixup(data, target, alpha=0.4, device=device)
-                optimizer.zero_grad()
-                output = model(data_mixed)
-                loss = lam * criterion(output, target_a) + (1 - lam) * criterion(output, target_b)
-                loss.backward()
-                optimizer.step()
-                epoch_loss_sum += loss.item()
-                num_batches_epoch += 1
-                if batch_idx > 0 and batch_idx % (len(train_loader) // 5 or 1) == 0:
-                    job_status["log_messages"].append(f"E{epoch} B{batch_idx}/{len(train_loader)} L: {loss.item():.4f}")
-                    job_status.update({
-                        "current_epoch": epoch, "loss": loss.item(),
-                        "zpe_effects": model.analyze_zpe_effect(),
-                        "gpu_info": get_gpu_usage_info_internal(),
-                    })
-                    try:
-                        save_job_status(job_id)
-                    except Exception as e:
-                        logger.error(f"Error saving job status during epoch {epoch}, batch {batch_idx}: {e}")
-
-            scheduler.step()
-            avg_epoch_train_loss = epoch_loss_sum / num_batches_epoch if num_batches_epoch > 0 else 0.0
-            model.eval()
-            val_correct, val_total, val_loss_sum, val_batches_epoch = 0, 0, 0.0, 0
-            with torch.no_grad():
-                for data_val, target_val in val_loader:
-                    data_val, target_val = data_val.to(device), target_val.to(device)
-                    output_val = model(data_val)
-                    val_loss = criterion(output_val, target_val)
-                    val_loss_sum += val_loss.item()
-                    val_batches_epoch += 1
-                    _, predicted_val = torch.max(output_val.data, 1)
-                    val_total += target_val.size(0)
-                    val_correct += (predicted_val == target_val).sum().item()
-
-            val_accuracy = (100 * val_correct / val_total) if val_total > 0 else 0.0
-            avg_epoch_val_loss = val_loss_sum / val_batches_epoch if val_batches_epoch > 0 else 0.0
-            epoch_time = time.time() - epoch_start_time
-
-            # Update job status
-            job_status.update({
-                "current_epoch": epoch, "accuracy": val_accuracy, "loss": avg_epoch_val_loss,
-                "zpe_effects": model.analyze_zpe_effect(),
-                "gpu_info": get_gpu_usage_info_internal()
-            })
-            job_status["zpe_history"].append({
-                "epoch": epoch, "zpe_effects": job_status["zpe_effects"]
-            })
-
-            # Log epoch data to CSV
-            training_logger.log_epoch(
-                job_id=job_status.get("job_id", ""),
-                epoch=epoch,
-                total_epochs=params.total_epochs,
-                timestamp=datetime.now().isoformat(),
-                model_name=params.model_name,
-                base_config_id=getattr(params, "base_config_id", ""),
-                train_loss=avg_epoch_train_loss,
-                val_loss=avg_epoch_val_loss,
-                val_accuracy=val_accuracy,
-                epoch_time=epoch_time,
-                params=params.model_dump() if hasattr(params, "model_dump") else vars(params),
-                zpe_effects=job_status.get("zpe_effects", [0.0]*6)
-            )
-
-            job_status["log_messages"].append(f"E{epoch} END - TrainL: {avg_epoch_train_loss:.4f}, ValAcc: {val_accuracy:.2f}%, ValL: {avg_epoch_val_loss:.4f}")
-            job_status["log_messages"].append(f"ZPE: {[f'{x:.4f}' for x in job_status['zpe_effects']]}")
-            save_job_status(job_id)
-
-        if job_status["status"] != "stopped":
-            job_status["status"] = "completed"
-            final_msg = f"Training done! Final Val Acc: {job_status['accuracy']:.2f}%"
-            job_status["log_messages"].append(final_msg)
-            logger.info(f"Job {job_id}: {final_msg}")
-            model_save_path = os.path.join(JOBS_DIR, f"{job_id}_model.pth")
-            torch.save(model.state_dict(), model_save_path)
-            job_status["log_messages"].append(f"Model saved: {model_save_path}")
+            epoch_loss = 0
             
-            # Log final job completion
-            training_logger.log_job_completion(job_status['job_id'], job_status['accuracy'], job_status['loss'])
+            for batch_idx, (data, target) in enumerate(train_loader):
+                data, target = data.to(device), target.to(device)
+                
+                mixup_alpha = getattr(params, 'mixup_alpha', 1.0)
+                data, target_a, target_b, lam = mixup(data, target, alpha=mixup_alpha)
+                
+                optimizer.zero_grad()
+                output = model(data)
+                loss = lam * criterion(output, target_a) + (1 - lam) * criterion(output, target_b)
+                
+                zpe_effects = model.analyze_zpe_effect()
+                # Assuming zpe_regularization_strength is a parameter you might want to add
+                zpe_reg_strength = getattr(params, 'zpe_regularization_strength', 0.001)
+                total_loss = loss + zpe_reg_strength * sum(zpe_effects)
+                
+                total_loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+
+            avg_epoch_loss = epoch_loss / len(train_loader) if len(train_loader) > 0 else 0
+            scheduler.step()
+
+            # Validation
+            model.eval()
+            val_correct = 0
+            val_total = 0
+            val_loss = 0
+            with torch.no_grad():
+                for data, target in val_loader:
+                    data, target = data.to(device), target.to(device)
+                    output = model(data)
+                    val_loss += criterion(output, target).item()
+                    _, predicted = torch.max(output.data, 1)
+                    val_total += target.size(0)
+                    val_correct += (predicted == target).sum().item()
+            
+            val_acc = 100 * val_correct / val_total
+            avg_val_loss = val_loss / len(val_loader) if len(val_loader) > 0 else 0
+            
+            # Update job status for frontend
+            log_msg = f"Epoch {epoch+1}/{params.total_epochs} Complete. Val Acc: {val_acc:.2f}%, Val Loss: {avg_val_loss:.4f}"
+            active_jobs[job_id]["log_messages"].append(log_msg)
+            active_jobs[job_id]["loss"] = avg_epoch_loss
+            active_jobs[job_id]["accuracy"] = val_acc
+            active_jobs[job_id]["zpe_effects"] = zpe_effects
+            
+            # For chart data
+            epoch_metrics = {
+                "epoch": epoch + 1,
+                "loss": avg_epoch_loss,
+                "val_loss": avg_val_loss,
+                "accuracy": val_acc,
+                "val_acc": val_acc # Use val_acc for both for now
+            }
+            if "metrics_history" not in active_jobs[job_id]:
+                active_jobs[job_id]["metrics_history"] = []
+            active_jobs[job_id]["metrics_history"].append(epoch_metrics)
+            
+            save_job_status(job_id)
+
+        active_jobs[job_id]["status"] = "completed"
+        active_jobs[job_id]["log_messages"].append("Training completed successfully.")
+        
+        # Save final model
+        model_path = os.path.join(JOBS_DIR, f"{job_id}_model.pth")
+        torch.save(model.state_dict(), model_path)
+        active_jobs[job_id]["log_messages"].append(f"Model saved to {model_path}")
 
     except Exception as e:
-        job_status["status"] = "failed"
-        error_msg = f"Train Error job {job_id}: {str(e)}"
         tb_str = traceback.format_exc()
-        job_status["log_messages"].extend([error_msg, tb_str])
-        logger.error(f"{error_msg}\n{tb_str}")
+        active_jobs[job_id]["status"] = "failed"
+        active_jobs[job_id]["log_messages"].append(f"Error during training: {e}")
+        active_jobs[job_id]["log_messages"].append(tb_str)
+        logger.error(f"Job {job_id} failed: {e}\n{tb_str}")
     finally:
-        job_status["end_time"] = datetime.now().isoformat()
-        job_status["gpu_info"] = get_gpu_usage_info_internal()
+        active_jobs[job_id]["end_time"] = time.time()
         save_job_status(job_id)
+
+# --- END NEW Training Job Logic ---
 
 # Chatbot AI Flow Functions
 async def call_get_quantum_explanation(job_id: str) -> str:
@@ -676,19 +614,20 @@ async def call_simulate_zpe(job_id: str) -> str:
 # API Endpoints
 @app.post("/api/train", summary="Start a training job")
 async def start_training_endpoint(params: TrainingParameters, background_tasks: BackgroundTasks):
-    print("[DEBUG] /api/train called. Params received:", params)
+    logger.info(f"/api/train called with parameters: {params.model_dump_json()}")
     try:
         job_id = f"zpe_job_{str(uuid.uuid4())[:8]}"
         active_jobs[job_id] = {
-            "job_id": job_id, "status": "pending", "current_epoch": 0, "zpe_history": [],
+            "job_id": job_id, "status": "pending", "current_epoch": 0,
             "total_epochs": params.total_epochs, "accuracy": 0.0, "loss": 0.0,
             "zpe_effects": [0.0] * 6, "log_messages": [f"Init job: {params.model_name}"],
             "parameters": params.model_dump(), "start_time": None, "end_time": None,
-            "gpu_info": get_gpu_usage_info_internal()
+            "gpu_info": get_gpu_usage_info_internal(), "metrics_history": []
         }
-        # If base_config_id is provided, log it and ensure it is used for weight loading in run_training_job
-        if hasattr(params, 'base_config_id') and params.base_config_id:
-            active_jobs[job_id]["log_messages"].append(f"base_config_id provided: {params.base_config_id}. Will attempt to load weights from this job if available.")
+        
+        if params.base_config_id:
+            active_jobs[job_id]["log_messages"].append(f"Attempting to use base_config_id: {params.base_config_id}.")
+        
         save_job_status(job_id)
         background_tasks.add_task(run_training_job, job_id, params)
         return {"status": "training_started", "job_id": job_id}
