@@ -181,52 +181,52 @@ def main():
     criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
-        # Training loop
+    # Training loop
     for epoch in range(epochs):
-            model.train()
-            train_loss = 0
-            correct = 0
-            total = 0
-            for batch_idx, (data, target) in enumerate(train_loader):
-                data, target = data.to(device), target.to(device)
-                optimizer.zero_grad()
-                output = model(data)
-                loss = criterion(output, target)
-                loss.backward()
-                optimizer.step()
-                train_loss += loss.item()
-                _, predicted = output.max(1)
-                total += target.size(0)
-                correct += predicted.eq(target).sum().item()
-                if batch_idx % 100 == 0:
+        model.train()
+        train_loss = 0
+        correct = 0
+        total = 0
+        for batch_idx, (data, target) in enumerate(train_loader):
+            data, target = data.to(device), target.to(device)
+            optimizer.zero_grad()
+            output = model(data)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()
+            _, predicted = output.max(1)
+            total += target.size(0)
+            correct += predicted.eq(target).sum().item()
+            if batch_idx % 100 == 0:
                 update_job_status(job_id, 'running', f'Epoch {epoch+1}/{epochs} - Batch {batch_idx}/{len(train_loader)} - Loss: {loss.item():.4f}')
         scheduler.step()
-            # Validation
-            model.eval()
-            val_loss = 0
-            val_correct = 0
-            val_total = 0
-            with torch.no_grad():
+        # Validation
+        model.eval()
+        val_loss = 0
+        val_correct = 0
+        val_total = 0
+        with torch.no_grad():
             for data, target in val_loader:
-                    data, target = data.to(device), target.to(device)
-                    output = model(data)
+                data, target = data.to(device), target.to(device)
+                output = model(data)
                 loss = criterion(output, target)
                 val_loss += loss.item()
-                    _, predicted = output.max(1)
-                    val_total += target.size(0)
-                    val_correct += predicted.eq(target).sum().item()
-            train_accuracy = 100. * correct / total
-            val_accuracy = 100. * val_correct / val_total
-            metrics = {
-                'epoch': epoch + 1,
-                'train_loss': train_loss / len(train_loader),
-                'train_accuracy': train_accuracy,
+                _, predicted = output.max(1)
+                val_total += target.size(0)
+                val_correct += predicted.eq(target).sum().item()
+        train_accuracy = 100. * correct / total
+        val_accuracy = 100. * val_correct / val_total
+        metrics = {
+            'epoch': epoch + 1,
+            'train_loss': train_loss / len(train_loader),
+            'train_accuracy': train_accuracy,
             'val_loss': val_loss / len(val_loader),
-                'val_accuracy': val_accuracy
-            }
+            'val_accuracy': val_accuracy
+        }
         update_job_status(job_id, 'running', f'Epoch {epoch+1} completed - Train Acc: {train_accuracy:.2f}% - Val Acc: {val_accuracy:.2f}%', metrics)
-        # Save model
-        os.makedirs('models', exist_ok=True)
+    # Save model
+    os.makedirs('models', exist_ok=True)
     torch.save(model.state_dict(), os.path.join('models', f'{model_name}_best.pth'))
     update_job_status(job_id, 'completed', f'Training completed. Model saved to models/{model_name}_best.pth')
 
