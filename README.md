@@ -1,46 +1,60 @@
-# QuantumWeaver: Zero-Point Energy Neural Network Platform
+# QuantumWeaver
 
-QuantumWeaver is a cutting-edge platform for Zero-Point Energy (ZPE) neural network research, training, and visualization. It features a robust backend for job management and data analysis, and a beautiful, modern frontend for interactive dashboards, visualizations, and model configuration.
+A web platform for running and tracking PyTorch training experiments. A FastAPI backend starts training jobs, reports their progress and keeps a record of every run. A Next.js dashboard launches jobs, compares results and shows GPU and system load. An LLM assistant suggests parameters for the next run based on the results so far.
+
+The model under study is a residual CNN with an adaptive layer after each block (called "ZPE flow" in the code). Each of these layers is a gain vector, kept between 0.8 and 1.2, that is updated on every forward pass from the batch statistics, with momentum and injected noise. The experiments test whether this kind of adaptive perturbation improves accuracy.
+
+## Results
+
+- 86 recorded training runs on MNIST, saved in `training_jobs/`
+- Best run: **99.74%** accuracy on the MNIST test set after 60 epochs (`training_jobs/zpe_job_169cda4c.json`)
 
 ## Features
-- **ZPE Neural Network Training**: Launch, monitor, and analyze advanced ZPE and HS-QNN jobs.
-- **Real-Time Dashboard**: Always up-to-date with the latest job results and metrics.
-- **Beautiful Visualizations**: Interactive Bloch Sphere, ZPE Particle Sim, and more, with neon/glassmorphism design.
-- **Mini Advisor**: Floating, draggable, and resizable HS-QNN advisor for quick parameter tweaks.
-- **Responsive & Accessible UI**: Mobile-friendly, dark/light mode, and a11y best practices.
-- **Log Management**: Merge, validate, and analyze training logs with robust scripts.
-- **Developer Experience**: TypeScript, Tailwind, ESLint, Prettier, and Python type hints.
 
-## Quick Start
+- Training jobs over a REST API: start, stop, status and history (`/api/train`, `/api/stop/{job_id}`, `/api/status/{job_id}`, `/api/jobs`)
+- Dashboard with accuracy and loss per epoch, the adaptive layer values of each run, and side-by-side run comparison
+- GPU and system monitoring (`/api/gpu-stats`, `/api/system-stats`)
+- Saved model configurations (`/api/configs`)
+- LLM advisors built as Genkit flows on Gemini: parameter suggestions and run analysis. The dataset advisor falls back across Groq, OpenRouter, Together AI, Hugging Face, Mistral, Ollama and LM Studio
+- Dataset download from Kaggle, Hugging Face and GitHub
+- Deployment blueprint for Render (`render.yaml`)
 
-1. **Install dependencies**
-   ```bash
-   npm install
-   python3 -m venv venv && source venv/bin/activate
-   pip install -r requirements.txt
-   ```
+## Stack
 
-2. **Run the app**
-   ```bash
-   npm run dev
-   # In another terminal (for backend)
-   python app.py
-   ```
+- **Backend:** Python, FastAPI, PyTorch, torchvision, scikit-learn, pandas
+- **Frontend:** Next.js, React, TypeScript, Tailwind CSS, shadcn/ui, Genkit, p5.js
 
-3. **Open in browser**
-   Visit [http://localhost:9002](http://localhost:9002)
+## Run locally
 
-## Development
-- **Frontend**: Next.js, React, Tailwind, shadcn/ui, p5.js for visualizations.
-- **Backend**: Python, FastAPI, PyTorch, pandas, joblib.
-- **Linting/Formatting**: ESLint, Prettier, and PEP8/Black for Python.
-- **Testing**: (TODO) Add Jest/Vitest for frontend, pytest for backend.
+Backend, on port 8000:
 
-## Contribution
-- Fork and clone the repo.
-- Use feature branches and submit pull requests.
-- Run `npm run lint` and `npm run typecheck` before committing.
-- Add/expand tests for new features.
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```
+
+Frontend, on port 9002 (it calls the backend at `http://localhost:8000/api`; set `NEXT_PUBLIC_API_BASE_URL` to change it):
+
+```bash
+cd src
+npm install
+npm run dev
+```
+
+MNIST is downloaded automatically on the first training run. The Genkit flows need a Gemini API key in `GEMINI_API_KEY` (or `GOOGLE_API_KEY`).
+
+## Project layout
+
+| Path | Contents |
+|---|---|
+| `app.py` | FastAPI backend: model, training loop, job manager, monitoring and config endpoints |
+| `train.py` | Standalone training script with the same model |
+| `src/app/` | Next.js pages: dashboard, train, performance, GPU monitor, configurations, data portal, visualizations |
+| `src/ai/flows/` | Genkit flows for parameter advice and run analysis |
+| `training_jobs/` | One JSON record per training run (parameters, per-epoch log, final accuracy) |
+| `scripts/` | Dataset download and export helpers |
 
 ## License
+
 MIT
