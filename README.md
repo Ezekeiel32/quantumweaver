@@ -1,5 +1,7 @@
 # QuantumWeaver
 
+[![CI](https://github.com/Ezekeiel32/quantumweaver/actions/workflows/ci.yml/badge.svg)](https://github.com/Ezekeiel32/quantumweaver/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/Ezekeiel32/quantumweaver?label=release)](https://github.com/Ezekeiel32/quantumweaver/releases) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE) ![Python](https://img.shields.io/badge/Python-3-3776AB) ![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C) ![FastAPI](https://img.shields.io/badge/FastAPI-009688) ![Next.js](https://img.shields.io/badge/Next.js-000000)
+
 A web platform for running and tracking PyTorch training experiments. A FastAPI backend starts training jobs, reports their progress and keeps a record of every run. A Next.js dashboard launches jobs, compares results and shows GPU and system load. An LLM assistant suggests parameters for the next run based on the results so far.
 
 The model under study is a residual CNN with an adaptive layer after each block (called "ZPE flow" in the code). Each of these layers is a gain vector, kept between 0.8 and 1.2, that is updated on every forward pass from the batch statistics, with momentum and injected noise. The experiments test whether this kind of adaptive perturbation improves accuracy.
@@ -8,6 +10,11 @@ The model under study is a residual CNN with an adaptive layer after each block 
 
 - 86 recorded training runs on MNIST, saved in `training_jobs/`
 - Best run: **99.74%** accuracy on the MNIST test set after 60 epochs (`training_jobs/zpe_job_169cda4c.json`)
+
+![Validation accuracy on MNIST across recorded training runs](docs/results-light.png#gh-light-mode-only)
+![Validation accuracy on MNIST across recorded training runs](docs/results-dark.png#gh-dark-mode-only)
+
+The figure is drawn from the run logs by `scripts/plot_results.py`.
 
 ## Features
 
@@ -54,6 +61,15 @@ MNIST is downloaded automatically on the first training run. The Genkit flows ne
 | `src/ai/flows/` | Genkit flows for parameter advice and run analysis |
 | `training_jobs/` | One JSON record per training run (parameters, per-epoch log, final accuracy) |
 | `scripts/` | Dataset download and export helpers |
+
+## Development
+
+```bash
+pip install pytest
+pytest -q
+```
+
+The tests read the recorded runs in `training_jobs/` and check that the numbers in this README match them. CI runs them on every pull request. The branch model and the pull request checklist are in [CONTRIBUTING.md](CONTRIBUTING.md), and release notes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
